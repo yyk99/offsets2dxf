@@ -1,4 +1,4 @@
-## Create a DXF file from boat offste table
+## Create a DXF file from a boat table of offsets
 
 ## REQUIRED packagas
 
