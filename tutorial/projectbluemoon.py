@@ -25,6 +25,7 @@ class ProjectBlueMoon(table_of_offsets.Model):
             }
         )
         # fmt: on
+        self._y_lwl = 4 * 12 + 1 + 7.0 / 8.0  # 4-1-7
         pass
 
     def station_positions(self):
@@ -50,7 +51,7 @@ class ProjectBlueMoon(table_of_offsets.Model):
     def base_offset(self, line_name: str):
         """(virtual) Returns the vertical offset for the given line"""
         if line_name in ["LWL to SHEER", "LWL to DECK EDG"]:
-            return 4 * 12 + 1 + 7.0 / 8.0  # 4-1-7
+            return self._y_lwl
 
         # the line_name is one of 'plane' lines
         if line_name in [
@@ -71,6 +72,21 @@ class ProjectBlueMoon(table_of_offsets.Model):
     def grid_y_origins(self):
         """(virtual) we want two horizontal (central) grid lines"""
         return [0, -10 * 12.0]
+
+    def waterlines_positions(self):
+        wl = {
+            "WL 2A": 18.0,
+            "WL 1A": 9.0,
+            "LWL": 0.0,
+            "WL 1B": -9.0,
+            "WL 2B": -18.0,
+        }
+        for k in wl:
+            wl[k] += self._y_lwl
+        return wl
+
+    def buttocks_positions(self):
+        return {"BASE TO B-3": 36.0, "BASE TO B-2": 24.0, "BASE TO B-1": 12.0}
 
     def plot_grid_more(self, dxf: object):
         """Draw second line for plane views"""
