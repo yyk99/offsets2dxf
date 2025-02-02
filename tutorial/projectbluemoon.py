@@ -9,7 +9,7 @@ import os
 
 
 #
-# Model implementation spicific for the sample data
+# Model implementation specific for the sample data
 #
 class ProjectBlueMoon(table_of_offsets.Model):
     def __init__(self):
@@ -108,7 +108,7 @@ class ProjectBlueMoon(table_of_offsets.Model):
             dxf.add_red_polyline(self.loft_line_n(7))
             dxf.add_red_polyline(self.loft_line_n(8))
             #
-            # now half-bradth
+            # now half-breadth
             #
             dxf.add_red_polyline(self.loft_line_n(9))
             dxf.add_red_polyline(self.loft_line_n(10))
@@ -116,6 +116,8 @@ class ProjectBlueMoon(table_of_offsets.Model):
             dxf.add_red_polyline(self.loft_line_n(12))
             dxf.add_red_polyline(self.loft_line_n(13))
             dxf.add_red_polyline(self.loft_line_n(14))
+
+            # draw a body line
 
 
 if __name__ == "__main__":
