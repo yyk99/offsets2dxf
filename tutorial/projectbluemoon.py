@@ -94,6 +94,15 @@ class ProjectBlueMoon(table_of_offsets.Model):
         """(virtual): central lines will be drawn here"""
         return [self._y0, self._y1]
 
+    def loft_body_line(self, station_id: str, points: list):
+        """loft a body plan line
+        station_id - e.g. "5"
+        points - e.g [("sheer", "sheer line"), "WL 1", "WL 2", ("rabbet", "rabbet line")]
+        """
+        polyline = []
+
+        return polyline
+
     def save_model_as(self, filename_dxf: str):
         with table_of_offsets.DXF(filename_dxf) as dxf:
             self.plot_grid(dxf)
@@ -118,6 +127,7 @@ class ProjectBlueMoon(table_of_offsets.Model):
             dxf.add_red_polyline(self.loft_line_n(14))
 
             # draw a body line
+            dxf.add_red_polyline(self.loft_body_line("5"))
 
 
 if __name__ == "__main__":
