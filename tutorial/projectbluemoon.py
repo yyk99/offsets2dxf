@@ -94,11 +94,20 @@ class ProjectBlueMoon(table_of_offsets.Model):
         """(virtual): central lines will be drawn here"""
         return [self._y0, self._y1]
 
-    def loft_body_line(self, station_id: str, points: list):
+    def loft_body_line(self, station_id: str, body_points: list):
         """loft a body plan line
         station_id - e.g. "5"
-        points - e.g [("sheer", "sheer line"), "WL 1", "WL 2", ("rabbet", "rabbet line")]
+        points - e.g [("SHEER", "SHEER LINE"), "WL 1", "WL 2", ("RABBET", "RABBET LINE")]
         """
+
+        # debug ON
+        for pp in body_points:
+            if type(pp) is tuple:
+                print(pp[0], ",", pp[1])
+            else:
+                print(pp, ",", pp)
+        # debug OFF
+
         polyline = []
 
         return polyline
@@ -127,7 +136,43 @@ class ProjectBlueMoon(table_of_offsets.Model):
             dxf.add_red_polyline(self.loft_line_n(14))
 
             # draw a body line
-            dxf.add_red_polyline(self.loft_body_line("5"))
+
+            # the pairs of point making a body line
+            """
+            #,1,2,3,4,5,6,7,8,TRAN.
+------------------ Y -----------------------------
+LWL to SHEER,3-6-5,3-0-0,2-6-4,2-2-5,2-0-3,1-11-7,2-1-7,2-3-1,2-7-4
+LWL to DECK EDG,2-6-5,2-0-1,1-6-5,1-2-6,1-0-4,1-0-0,1-2-0,1-5-2,1-8-2
+BASE TO B-3,,,4-10-1,3-5-7,3-3-6,3-8-1,4-7-0,5-4-6,
+BASE TO B-2,,5-5-7,3-6-0,2-11-0,2-10-5,3-2-7,4-1-2,4-9-2,5-0-2
+BASE TO B-1,,3-9-3,2-8-3,2-3-7,2-4-4,2-9-0,3-8-6,4-5-5,4-7-2
+RABBET TO BASE,4-7-4,2-11-0,2-0-5,1-7-3,1-3-1,1-1-7,3-2-1,4-3-0,4-3-4
+KEEL TO BASE,4-1-7,2-4-6,1-4-2,0-9-3,0-5-2,0-2-1,1-7-3,4-1-7,
+CENTERLINE SHAFT,,,,,,3-0-4,2-9-6,,
+BASE TO TOP BAL.,,,1-8-3,1-5-4,1-2-6,0-8-3,,,
+--------------------- X --------------------------
+SHEER,0-10-0,2-8-0,3-9-0,4-2-4,4-4-0,4-1-4,3-6-2,3-1-1,2-6-2
+WL 2A,0-5-0,2-0-7,3-4-7,4-1-7,4-4-2,4-1-7,3-6-6,3-1-6,2-10-1
+WL 1A,0-2-7,1-8-3,3-0-6,3-11-6,4-4-0,4-0-7,3-4-2,2-3-1,1-9-0
+LWL,,1-3-0,2-7-0,3-6-5,4-0-6,3-8-6,2-1-3,0-1-0,0-1-0
+WL 1B,,0-7-7,1-10-6,2-10-3,3-1-6,2-4-1,0-4-7,,
+WL 2B,,,0-11-4,1-6-4,1-6-4,0-10-1,0-2-4,,
+RABBET,0-2-0,0-2-2,0-2-6,0-3-0,0-3-0,0-3-0,0-3-0,0-3-0,0-3-0
+KEEL,0-0-4,0-0-4,0-1-4,0-3-0,0-3-0,0-3-0,0-1-0,0-1-0,0-1-0
+BALLAST TOP,,,0-2-0,0-3-0,0-3-0,0-3-0,,,
+D. UPPER,0-7-0,2-1-7,3-3-7,4-1-5,4-4-7,4-1-2,3-2-4,2-5-6,
+D. LOWER,,1-0-0,1-9-3,2-1-5,2-1-6,2-2-4,0-10-7,,
+,,,,,,,,,
+RED-CORRECTED,,,,,,,,,
+            """
+
+            body_points = [
+                ("sheer", "sheer line"),
+                "WL 1",
+                "WL 2",
+                ("rabbet", "rabbet line"),
+            ]
+            dxf.add_red_polyline(self.loft_body_line("5", body_points))
 
 
 if __name__ == "__main__":
