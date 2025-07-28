@@ -9,7 +9,7 @@ import os
 
 
 #
-# Model implementation spicific for the sample data
+# Model implementation specific for the sample data
 #
 class Project181(table_of_offsets.Model):
     def __init__(self):

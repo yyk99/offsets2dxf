@@ -190,15 +190,12 @@ class Model:
         return [0.0]
 
     def loft_body_line(self: object, station: str, width: list, heights: list):
-        """return a polylie to represent a body line at the given station"""
+        """return a polyline to represent a body line at the given station"""
         poly = []
 
         print("TODO: loft_body_line(...) is not implemented yet")
 
         return poly
-
-        # the first point is expected on the sheer
-        poly = []
 
 
 class DXF:
