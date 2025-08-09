@@ -94,23 +94,50 @@ class ProjectBlueMoon(table_of_offsets.Model):
         """(virtual): central lines will be drawn here"""
         return [self._y0, self._y1]
 
-    def loft_body_line(self, station_id: str, body_points: list):
-        """loft a body plan line
-        station_id - e.g. "5"
-        points - e.g [("SHEER", "SHEER LINE"), "WL 1", "WL 2", ("RABBET", "RABBET LINE")]
-        """
+    # 0         LWL to SHEER
+    # 1      LWL to DECK EDG
+    # 2          BASE TO B-3
+    # 3          BASE TO B-2
+    # 4          BASE TO B-1
+    # 5       RABBET TO BASE
+    # 6         KEEL TO BASE
+    # 7     CENTERLINE SHAFT
+    # 8     BASE TO TOP BAL.
 
-        # debug ON
-        for pp in body_points:
-            if type(pp) is tuple:
-                print(pp[0], ",", pp[1])
-            else:
-                print(pp, ",", pp)
-        # debug OFF
+    # 9                SHEER
+    # 10               WL 2A
+    # 11               WL 1A
+    # 12                 LWL
+    # 13               WL 1B
+    # 14               WL 2B
+    # 15              RABBET
+    # 16                KEEL
+    # 17         BALLAST TOP
+    # 18            D. UPPER
+    # 19            D. LOWER
 
-        polyline = []
+    # {'LWL to SHEER': 0, 'LWL to DECK EDG': 1, 'BASE TO B-3': 2, 'BASE TO B-2': 3, 'BASE TO B-1': 4, 'RABBET TO BASE': 5, 'KEEL TO BASE': 6, 'CENTERLINE SHAFT': 7, 'BASE TO TOP BAL.': 8, 'SHEER': 9, 'WL 2A': 10, 'WL 1A': 11, 'LWL': 12, 'WL 1B': 13, 'WL 2B': 14, 'RABBET': 15, 'KEEL': 16, 'BALLAST TOP': 17, 'D. UPPER': 18, 'D. LOWER': 19, nan: 20, 'RED-CORRECTED': 21}
 
-        return polyline
+    def breadth_line_to_index(self: object, line_id: str) -> int:
+        """virtual: "sheer" -> 0"""
+        line_ids = list(self._too["#"])
+        line_id_to_index = {line_ids[idx]: idx for idx in range(9, 20)}
+        print(line_id_to_index)  # DEBUG
+        return line_id_to_index
+
+    def height_line_to_index(self: object, line_id: str) -> int:
+        """virtual: "rabbet" -> 0"""
+        return {
+            "LWL to SHEER": 0,
+            "LWL to DECK EDG": 1,
+            "BASE TO B-3": 2,
+            "BASE TO B-2": 3,
+            "BASE TO B-1": 4,
+            "RABBET TO BASE": 5,
+            "KEEL TO BASE": 6,
+            "CENTERLINE SHAFT": 7,
+            "BASE TO TOP BAL.": 8,
+        }
 
     def save_model_as(self, filename_dxf: str):
         with table_of_offsets.DXF(filename_dxf) as dxf:

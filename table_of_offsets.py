@@ -189,13 +189,57 @@ class Model:
         """(virtual) returns y-coordinate list of the horizontal lines in the grid"""
         return [0.0]
 
-    def loft_body_line(self: object, station: str, width: list, heights: list):
-        """return a polyline to represent a body line at the given station"""
+    def loft_body_line(self, station_id: str, body_points: list):
+        """return a polyline to represent a body line at the given station
+        loft a body plan line
+        station_id - e.g. "5"
+        points - e.g [("SHEER", "SHEER LINE"), "WL 1", "WL 2", ("RABBET", "RABBET LINE")]
+        """
+
         poly = []
 
-        print("TODO: loft_body_line(...) is not implemented yet")
+        for pp in body_points:
+            if type(pp) is tuple:
+                x = self.breadth_at(station_id, pp[0])
+                y = self.height_at(station_id, pp[1])
+            else:
+                x = self.breadth_at(station_id, pp)
+                y = self.height_at(station_id, pp)
+            poly.append((x, y))
 
         return poly
+
+    def breadth_line_to_index(self: object, line_id: str) -> int:
+        """virtual: "sheer" -> 0"""
+        raise Exception(
+            "Please implement breadth_line_to_index(self: object, line_id: str)"
+        )
+
+    def height_line_to_index(self: object, line_id: str) -> int:
+        """virtual: "rabbet" -> 0"""
+        raise Exception(
+            "Please implement height_line_to_index(self: object, line_id: str)"
+        )
+
+    def breadth_at(self: object, station_id: str, line_id: str) -> float:
+        """returns  the breads at the given station_id at the given line_id
+
+        E.g. ("5", "sheer")
+        """
+        print("breadth_at", station_id, line_id)
+        l2i = self.breadth_line_to_index(line_id)
+        pos = l2i[line_id]
+        off = self._too.loc([pos, station_id])
+        return off
+
+    def height_at(self, station_id: str, line_id: str) -> float:
+        """returns  the breads at the given station_id at the given line_id
+
+        E.g. ("5", "WL 2")"""
+        print("height_at", station_id, line_id)
+        pos = self.height_line_to_index(line_id)
+        off = self._too.loc([pos, station_id])
+        return off
 
 
 class DXF:
