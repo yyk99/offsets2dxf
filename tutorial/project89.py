@@ -1,6 +1,8 @@
-#
-#
-#
+"""Project 89: model of the sample table (sample_data/offset_table.csv).
+
+Plan/profile layout is two grid lines; body line lofting is unfinished here.
+Run: ``python3 project89.py`` -> writes test_project89.dxf
+"""
 
 import context
 from context import table_of_offsets
@@ -101,23 +103,9 @@ class Project89(table_of_offsets.Model):
             dxf.add_red_polyline(self.loft_line_n(11))
             dxf.add_red_polyline(self.loft_line_n(12))
 
-            heights = ["Sheer", "B 3'", "B 2'", "B 1'", "Rabbet", "Profile"]
-            widths = [
-                "1/2w Deck",
-                "WL + 2'",
-                "WL + 1'",
-                'WL + 6"',
-                "LWL",
-                'WL - 6"',
-                "WL - 1'",
-                "WL - 2'",
-                "WL - 3'",
-                "WL - 4'",
-                "Rabbet Plan",
-                "Profile Plan",
-            ]
-            dxf.add_red_polyline(self.loft_body_line("18", widths, heights))
-
+            # TODO: body plan lines are not implemented for this project yet.
+            # loft_body_line(station, [(breadth, height), ...]) takes pairs;
+            # see projectbluemoon.py body_lines() for an example.
 
 if __name__ == "__main__":
     proj = Project89()

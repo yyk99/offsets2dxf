@@ -1,6 +1,7 @@
-#
-#
-#
+"""Project 181: model for sample_data_too/offset_table_181.csv.
+
+Run: ``python3 project181.py`` -> writes a .dxf into the current directory.
+"""
 
 import context
 from context import table_of_offsets

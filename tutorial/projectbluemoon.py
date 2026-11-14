@@ -1,6 +1,15 @@
-#
-#
-#
+"""Blue Moon: model for sample_data_too/offset_table_blue_moon.csv.
+
+The table has 9 stations (1-8 and TRAN.) in two halves: heights (upper rows,
+e.g. "LWL to SHEER", "BASE TO B-2") and half-breadths (lower rows, e.g.
+"SHEER", "LWL"). Heights named "BASE ..." are measured from the base line;
+"LWL to ..." heights are measured from the LWL, which is ``_y_lwl`` above the
+base. Station 8 and TRAN. are placed specially in ``station_positions``.
+
+Run: ``python3 projectbluemoon.py`` (from tutorial/) writes
+test_project_blue_moon.dxf (everything) and
+test_project_blue_moon_body.dxf (body lines only).
+"""
 
 import context
 from context import table_of_offsets
@@ -118,26 +127,39 @@ class ProjectBlueMoon(table_of_offsets.Model):
 
     # {'LWL to SHEER': 0, 'LWL to DECK EDG': 1, 'BASE TO B-3': 2, 'BASE TO B-2': 3, 'BASE TO B-1': 4, 'RABBET TO BASE': 5, 'KEEL TO BASE': 6, 'CENTERLINE SHAFT': 7, 'BASE TO TOP BAL.': 8, 'SHEER': 9, 'WL 2A': 10, 'WL 1A': 11, 'LWL': 12, 'WL 1B': 13, 'WL 2B': 14, 'RABBET': 15, 'KEEL': 16, 'BALLAST TOP': 17, 'D. UPPER': 18, 'D. LOWER': 19, nan: 20, 'RED-CORRECTED': 21}
 
-    def breadth_line_to_index(self: object, line_id: str) -> int:
-        """virtual: "sheer" -> 0"""
-        line_ids = list(self._too["#"])
-        line_id_to_index = {line_ids[idx]: idx for idx in range(9, 20)}
-        print(line_id_to_index)  # DEBUG
-        return line_id_to_index
+    def body_lines(self):
+        """Return {station: polyline} with the body plan line of every station"""
+        # (breadth, height) pairs. A string is a table row, a number is inches.
+        wl = self.waterlines_positions()
+        body_points = [
+            ("SHEER", "LWL to SHEER"),
+            ("RABBET", "RABBET TO BASE"),
+            ("KEEL", "KEEL TO BASE"),
+            ("BALLAST TOP", "BASE TO TOP BAL."),
+            # waterlines: breadth from the table, height is the waterline
+            ("WL 2A", wl["WL 2A"]),
+            ("WL 1A", wl["WL 1A"]),
+            ("LWL", wl["LWL"]),
+            ("WL 1B", wl["WL 1B"]),
+            ("WL 2B", wl["WL 2B"]),
+            # buttocks: height from the table, breadth is the buttock
+            (36.0, "BASE TO B-3"),
+            (24.0, "BASE TO B-2"),
+            (12.0, "BASE TO B-1"),
+        ]
+        lines = {}
+        for station in self.station_positions():
+            poly = self.loft_body_line(station, body_points, skip_missing=True)
+            # a section runs from the sheer down to the keel
+            poly.sort(key=lambda pt: -pt[1])
+            lines[station] = poly
+        return lines
 
-    def height_line_to_index(self: object, line_id: str) -> int:
-        """virtual: "rabbet" -> 0"""
-        return {
-            "LWL to SHEER": 0,
-            "LWL to DECK EDG": 1,
-            "BASE TO B-3": 2,
-            "BASE TO B-2": 3,
-            "BASE TO B-1": 4,
-            "RABBET TO BASE": 5,
-            "KEEL TO BASE": 6,
-            "CENTERLINE SHAFT": 7,
-            "BASE TO TOP BAL.": 8,
-        }
+    def save_body_lines_as(self, filename_dxf: str):
+        """Save the body lines only (no grid, no plan/profile lines)"""
+        with table_of_offsets.DXF(filename_dxf) as dxf:
+            for poly in self.body_lines().values():
+                dxf.add_red_polyline(poly)
 
     def save_model_as(self, filename_dxf: str):
         with table_of_offsets.DXF(filename_dxf) as dxf:
@@ -193,18 +215,15 @@ D. LOWER,,1-0-0,1-9-3,2-1-5,2-1-6,2-2-4,0-10-7,,
 RED-CORRECTED,,,,,,,,,
             """
 
-            body_points = [
-                ("sheer", "sheer line"),
-                "WL 1",
-                "WL 2",
-                ("rabbet", "rabbet line"),
-            ]
-            dxf.add_red_polyline(self.loft_body_line("5", body_points))
+            for poly in self.body_lines().values():
+                dxf.add_red_polyline(poly)
 
 
 if __name__ == "__main__":
     proj = ProjectBlueMoon()
     proj.save_model_as("test_project_blue_moon.dxf")
     print("Saved as:", os.path.abspath("test_project_blue_moon.dxf"))
+    proj.save_body_lines_as("test_project_blue_moon_body.dxf")
+    print("Saved as:", os.path.abspath("test_project_blue_moon_body.dxf"))
 
 # end of file

@@ -1,3 +1,5 @@
+"""Tests for table_of_offsets: offset parsing and breadth/height lookup."""
+
 from context import table_of_offsets
 
 import unittest
@@ -125,3 +127,32 @@ class Test_TableOfOffsets(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Test_BodyLine(unittest.TestCase):
+    """breadth_at / height_at / loft_body_line on sample_data/offset_table.csv"""
+
+    def setUp(self):
+        self.model = table_of_offsets.Model(
+            os.path.join(source_directory, "sample_data", "offset_table.csv")
+        )
+
+    def test_breadth_at(self):
+        # Sheer at station 32 is 1-10-2
+        self.assertEqual(22.25, self.model.breadth_at("32", "Sheer"))
+
+    def test_height_at(self):
+        # B 1' at station 30 is 0-3-4
+        self.assertEqual(3.5, self.model.height_at("30", "B 1'"))
+
+    def test_loft_body_line(self):
+        poly = self.model.loft_body_line("30", [("Sheer", "B 1'"), "Rabbet"])
+        self.assertEqual([(20.75, 3.5), (0.25, 0.25)], poly)
+
+    def test_errors(self):
+        with self.assertRaises(KeyError):
+            self.model.breadth_at("32", "nope")
+        with self.assertRaises(KeyError):
+            self.model.breadth_at("99", "Sheer")
+        with self.assertRaises(ValueError):
+            self.model.breadth_at("33", "Sheer")  # empty cell

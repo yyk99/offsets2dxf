@@ -1,6 +1,22 @@
-#
-#
-#
+"""Create a DXF drawing from a boat's table of offsets.
+
+A table of offsets is a CSV file:
+
+- the first column (header ``#``) holds the line names, one per row
+  (e.g. ``Sheer``, ``B 3'``, ``LWL``);
+- the other columns are stations (e.g. ``33``, ``32`` ... ``0``, or ``TRAN.``);
+- a cell holds an offset in feet-inches-eighths, e.g. ``1-10-2``
+  (see ``TableOfOffsets.offset2double``); an empty cell means "no point".
+
+All lengths in this module are in inches (see ``Model.units``).
+
+Classes:
+
+- ``TableOfOffsets`` - parsing of the offset strings.
+- ``Model`` - base class: loads a CSV and lofts polylines (plan, profile and
+  body plan lines). Subclass it for each boat, see ``tutorial/``.
+- ``DXF`` - thin context-manager wrapper around ``ezdxf`` that saves the file.
+"""
 
 import ezdxf
 import ezdxf.entities
@@ -13,23 +29,27 @@ __version__ = "0.5.0"
 
 
 class TableOfOffsets:
+    """Helpers to convert offsets written as ``feet-inches-eighths`` to inches."""
+
     def __init__(self):
         pass
 
-    """#      Sheer
-33       NaN
-32    1-10-2
-...
-0      3-0-7
-Name: 0, dtype: object
-"""
-
     @staticmethod
     def verify_triplet(w: list):
+        """Validate the parts of an offset split by "-". Not implemented yet:
+        always returns True."""
         return True
 
     @staticmethod
     def offset2double(triplet: str):
+        """Convert an offset string to inches (float).
+
+        Format: ``feet-inches-eighths``; trailing parts may be omitted:
+        ``1-10-2`` -> 12 + 10 + 2/8 = 22.25, ``0-1`` -> 1.0, ``1`` -> 12.0.
+        A trailing ``+`` or ``-`` means plus/minus 1/16 inch:
+        ``0-0-1+`` -> 0.1875, ``0-0-1-`` -> 0.0625.
+        Raises an exception for a malformed string.
+        """
         delta = 0
         if triplet[-1] == "-":
             delta = -1.0 / 16
@@ -53,6 +73,30 @@ Name: 0, dtype: object
 
 
 class Model:
+    """A boat's table of offsets (loaded from CSV) and the geometry lofted from it.
+
+    This is a base class. Subclass it for each boat and override the hooks
+    that differ from the defaults:
+
+    - ``station_positions`` - x position of every station column;
+    - ``waterlines_positions``, ``buttocks_positions`` - reference lines to
+      draw on the grid;
+    - ``base_offset`` - vertical shift of a line on the drawing sheet;
+    - ``grid_y_origins``, ``drawing_area_vertical_borders`` - grid layout;
+    - ``breadth_line_to_index``, ``height_line_to_index`` - map a line name to
+      a table row (default: look the name up in the ``#`` column);
+    - ``set_under_waterline`` - mark offsets that must be negated.
+
+    Typical use (see ``tutorial/projectbluemoon.py``)::
+
+        class MyBoat(Model):
+            ...
+
+        with DXF("out.dxf") as dxf:
+            boat.plot_grid(dxf)
+            dxf.add_red_polyline(boat.loft_line_n(0))
+    """
+
     def __init__(self: object, _filename_csv: str):
         self._filename_csv = _filename_csv
         self._too = pandas.read_csv(self._filename_csv)
@@ -60,13 +104,20 @@ class Model:
         pass
 
     def set_under_waterline(self, d: dict):
+        """Set the offsets to be negated, as ``{line_name: [station, ...]}``.
+        Used where a table gives positive values below the waterline."""
         self._under_waterline = d
 
     def units(self):
+        """Name of the length unit used for all returned values."""
         return "inch"
 
     def station_positions(self):
-        """Return a dictionary of station positions"""
+        """(virtual) Return ``{station_name: x_position}`` for every station column.
+
+        The default suits the 33-station sample table: station ``s`` is at
+        ``(33 - s) * 12`` inches. Override it for other layouts.
+        """
         station_positions = {}
         for c in self._too.columns:
             if c == "#":
@@ -109,7 +160,12 @@ class Model:
         return 0
 
     def loft_line_n(self, n: int):
-        """return polyline for n-th line"""
+        """Return the polyline ``[(x, y), ...]`` for the n-th table row.
+
+        x is the station position, y is the offset in inches (negated by
+        ``offset_sign``, shifted by ``base_offset``). Stations with an empty
+        cell are skipped. Points keep the column order of the CSV.
+        """
         line_offsets = self._too.loc[n]
         stations = self.station_positions()
 
@@ -127,6 +183,7 @@ class Model:
         return poly_line
 
     def loft_line_n_sorted(self, n: int):
+        """Like ``loft_line_n`` but the points are sorted by x."""
 
         def first(t: tuple):
             return t[0]
@@ -143,6 +200,9 @@ class Model:
         return self.loft_line_n(1)
 
     def plot_grid(self, dxf: object):
+        """Draw the grid into ``dxf`` (a ``DXF`` object): central lines, one
+        vertical line and label per station, waterlines and buttocks lines.
+        """
 
         stations = self.station_positions()
         xx = stations.values()
@@ -189,61 +249,108 @@ class Model:
         """(virtual) returns y-coordinate list of the horizontal lines in the grid"""
         return [0.0]
 
-    def loft_body_line(self, station_id: str, body_points: list):
+    def loft_body_line(
+        self, station_id: str, body_points: list, skip_missing: bool = False
+    ):
         """return a polyline to represent a body line at the given station
         loft a body plan line
         station_id - e.g. "5"
-        points - e.g [("SHEER", "SHEER LINE"), "WL 1", "WL 2", ("RABBET", "RABBET LINE")]
+        body_points - list of (breadth, height) pairs. Each item is either
+            a line name (looked up in the table at station_id) or a number
+            (inches, used as is), e.g.
+            [("SHEER", "LWL to SHEER"), ("WL 1A", 9.0), (36.0, "BASE TO B-3")]
+        A plain string is used as both the breadth and the height line name.
+        skip_missing - skip points whose table cell is empty at this station
+            instead of raising ValueError
+        Points are (half-breadth, height).
         """
 
         poly = []
 
         for pp in body_points:
             if type(pp) is tuple:
-                x = self.breadth_at(station_id, pp[0])
-                y = self.height_at(station_id, pp[1])
+                breadth_line, height_line = pp
             else:
-                x = self.breadth_at(station_id, pp)
-                y = self.height_at(station_id, pp)
+                breadth_line = height_line = pp
+            try:
+                if isinstance(breadth_line, str):
+                    x = self.breadth_at(station_id, breadth_line)
+                else:
+                    x = float(breadth_line)
+                if isinstance(height_line, str):
+                    y = self.height_at(station_id, height_line)
+                else:
+                    y = float(height_line)
+            except ValueError:
+                if not skip_missing:
+                    raise
+                continue
             poly.append((x, y))
 
         return poly
 
-    def breadth_line_to_index(self: object, line_id: str) -> int:
-        """virtual: "sheer" -> 0"""
-        raise Exception(
-            "Please implement breadth_line_to_index(self: object, line_id: str)"
+    def line_to_index(self, line_id: str) -> int:
+        """Return the row index of the line named line_id (the "#" column)"""
+        names = list(self._too["#"])
+        if line_id not in names:
+            raise KeyError("unknown line: %r" % (line_id,))
+        return names.index(line_id)
+
+    def breadth_line_to_index(self, line_id: str) -> int:
+        """(virtual) "sheer" -> row index; default is lookup by name"""
+        return self.line_to_index(line_id)
+
+    def height_line_to_index(self, line_id: str) -> int:
+        """(virtual) "rabbet" -> row index; default is lookup by name"""
+        return self.line_to_index(line_id)
+
+    def _offset_at(
+        self, row: int, station_id: str, line_id: str, vertical: bool
+    ) -> float:
+        if station_id not in self._too.columns:
+            raise KeyError("unknown station: %r" % (station_id,))
+        offset = self._too.loc[row, station_id]
+        if type(offset) is not str:
+            raise ValueError(
+                "no offset for line %r at station %r" % (line_id, station_id)
+            )
+        value = TableOfOffsets.offset2double(offset)
+        if not vertical:
+            # base_offset() positions lines on the drawing sheet (vertical only)
+            return value
+        return self.offset_sign(station_id, line_id) * value + self.base_offset(
+            line_id
         )
 
-    def height_line_to_index(self: object, line_id: str) -> int:
-        """virtual: "rabbet" -> 0"""
-        raise Exception(
-            "Please implement height_line_to_index(self: object, line_id: str)"
-        )
-
-    def breadth_at(self: object, station_id: str, line_id: str) -> float:
-        """returns  the breads at the given station_id at the given line_id
+    def breadth_at(self, station_id: str, line_id: str) -> float:
+        """returns the half-breadth (inches) at the given station_id at the given line_id
 
         E.g. ("5", "sheer")
         """
-        print("breadth_at", station_id, line_id)
-        l2i = self.breadth_line_to_index(line_id)
-        pos = l2i[line_id]
-        off = self._too.loc([pos, station_id])
-        return off
+        return self._offset_at(
+            self.breadth_line_to_index(line_id), station_id, line_id, False
+        )
 
     def height_at(self, station_id: str, line_id: str) -> float:
-        """returns  the breads at the given station_id at the given line_id
+        """returns the height (inches) at the given station_id at the given line_id
 
         E.g. ("5", "WL 2")"""
-        print("height_at", station_id, line_id)
-        pos = self.height_line_to_index(line_id)
-        off = self._too.loc([pos, station_id])
-        return off
+        return self._offset_at(
+            self.height_line_to_index(line_id), station_id, line_id, True
+        )
 
 
 class DXF:
-    """
+    """Context manager that collects polylines and text and saves a DXF file.
+
+    Usage::
+
+        with DXF("out.dxf") as dxf:
+            dxf.add_red_polyline([(0, 0), (10, 5)])
+
+    The file is saved when the ``with`` block exits. Layers: ``grid``,
+    ``red`` (lofted lines), ``text``.
+
     ACI colors
     1: Red
     2: Yellow
@@ -280,22 +387,26 @@ class DXF:
         return True
 
     def add_polyline(self, poly: list):
+        """Add a 2D polyline ``[(x, y), ...]`` to the default layer."""
         self._msp.add_polyline2d(poly)
 
     def add_red_polyline(self, poly: list):
+        """Add a 2D polyline to the ``red`` layer."""
         self._msp.add_polyline2d(poly, dxfattribs={"layer": "red"})
 
     def add_grid_polyline(self, poly: list):
+        """Add a 2D polyline to the ``grid`` layer."""
         self._msp.add_polyline2d(poly, dxfattribs={"layer": "grid"})
 
     def close(self):
+        """Save the file. Called automatically on leaving the ``with`` block."""
         if self._doc is not None:
             self._doc.saveas(self._output_dxf)
             self._doc = None
             self._msp = None
 
     def text(self, xy: tuple, txt: str):
-        """Add text to the tet layer
+        """Add text to the ``text`` layer
 
         # Using a predefined text style:
         msp.add_text(
