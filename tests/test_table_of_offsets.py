@@ -153,6 +153,115 @@ class Test_Units(unittest.TestCase):
             table_of_offsets.Model(csv, unit="furlong")
 
 
+class Test_OutputUnit(unittest.TestCase):
+    def draw(self, unit):
+        import tempfile
+
+        import ezdxf
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "unit.dxf")
+            kwargs = {} if unit is None else {"unit": unit}
+            with table_of_offsets.DXF(out, **kwargs) as dxf:
+                dxf.add_red_polyline([(0, 0), (10, 20)])
+                dxf.text((10, 20), "A")
+            doc = ezdxf.readfile(out)
+        msp = doc.modelspace()
+        poly = [e for e in msp if e.dxftype() == "POLYLINE"][0]
+        text = [e for e in msp if e.dxftype() == "TEXT"][0]
+        return doc, [tuple(p)[:2] for p in poly.points()], text
+
+    def test_dxf_unit(self):
+        import ezdxf.units
+
+        # the default: inches, as given
+        doc, pts, text = self.draw(None)
+        self.assertEqual(ezdxf.units.IN, doc.units)
+        self.assertEqual([(0, 0), (10, 20)], pts)
+        self.assertEqual(1.0, text.dxf.height)
+
+        # the coordinates (and the text height) are converted from inches
+        doc, pts, text = self.draw("mm")
+        self.assertEqual(ezdxf.units.MM, doc.units)
+        self.assertAlmostEqual(254.0, pts[1][0])
+        self.assertAlmostEqual(508.0, pts[1][1])
+        self.assertAlmostEqual(25.4, text.dxf.height)
+        self.assertAlmostEqual(254.0, text.dxf.align_point.x)
+
+        doc, pts, _ = self.draw("ft")
+        self.assertEqual(ezdxf.units.FT, doc.units)
+        self.assertAlmostEqual(10 / 12.0, pts[1][0])
+
+        with self.assertRaises(ValueError):
+            table_of_offsets.DXF("x.dxf", unit="ftin")
+
+    def test_model_output_unit(self):
+        csv = os.path.join(source_directory, "sample_data", "offset_table.csv")
+        model = table_of_offsets.Model(csv)  # ftin
+        self.assertEqual("inch", model.output_unit())  # the same as the input
+        model.set_output_unit("mm")
+        self.assertEqual("mm", model.output_unit())
+        model.set_output_unit(None)
+        self.assertEqual("inch", model.output_unit())
+        with self.assertRaises(ValueError):
+            model.set_output_unit("ftin")
+
+        mm = table_of_offsets.Model(
+            os.path.join(
+                source_directory, "sample_data", "a_ferrocement_hull", "offset_table.csv"
+            ),
+            unit="mm",
+        )
+        self.assertEqual("mm", mm.output_unit())
+
+    def test_script_args(self):
+        f = table_of_offsets.parse_script_args
+        self.assertIsNone(f([]).output_units)
+        self.assertEqual("mm", f(["--output-units", "mm"]).output_units)
+        with self.assertRaises(SystemExit):
+            f(["--output-units", "furlong"])
+
+
+class Test_WaterlineBodyPoints(unittest.TestCase):
+    """the waterlines that are in the table are always body line points"""
+
+    class Model(table_of_offsets.Model):
+        def waterlines_positions(self):
+            # "LWL" and 'WL + 6"' are rows of the table, "NOT IN TABLE" is not
+            return {"LWL": 0.0, 'WL + 6"': 6.0, "NOT IN TABLE": 99.0}
+
+    def setUp(self):
+        csv = os.path.join(source_directory, "sample_data", "offset_table.csv")
+        self.model = self.Model(csv)
+
+    def test_waterline_body_points(self):
+        self.assertEqual(
+            [("LWL", 0.0), ('WL + 6"', 6.0)], self.model.waterline_body_points()
+        )
+
+    def test_added_to_every_body_line(self):
+        # no body_points given: the body line is made of the waterlines only
+        lines = self.model.loft_body_lines([], "raw")
+        # LWL at station 18: breadth 3-9-6, height 0
+        self.assertIn((45.75, 0.0), lines["18"][0])
+        # WL + 6" at station 18: breadth 4-1-1
+        self.assertIn((49.125, 6.0), lines["18"][0])
+        self.assertEqual(2, len(lines["18"][0]))
+        # no point at the stations where the cells are empty
+        self.assertEqual([], lines["33"])
+
+    def test_waterline_row(self):
+        class Renamed(self.Model):
+            def waterline_row(self, name):
+                return {"LWL": "Sheer"}.get(name, name)
+
+        csv = os.path.join(source_directory, "sample_data", "offset_table.csv")
+        # the breadth of "LWL" is taken from the row "Sheer"
+        self.assertEqual(
+            [("Sheer", 0.0), ('WL + 6"', 6.0)], Renamed(csv).waterline_body_points()
+        )
+
+
 class Test_Output(unittest.TestCase):
     def test_output_dir_from_args(self):
         f = table_of_offsets.output_dir_from_args

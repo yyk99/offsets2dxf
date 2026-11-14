@@ -28,6 +28,12 @@ In Visual Studio Code
 
 ## USAGE
 
+The coordinates in the `.dxf` files are in the unit of the table of offsets
+(inches for the feet-inches-eighths tables, millimetres for the ferrocement
+hull); `--output-units inch|ft|mm|cm|m` (or `Model.set_output_unit`) chooses
+another one. The unit is also stored in the file. The program itself works in
+inches.
+
 Run a project script; it writes its `.dxf` files into `./out` in the current
 directory (git-ignored, created if needed). Use `--out-dir DIR` to write
 somewhere else (a relative `DIR` is relative to the current directory):
@@ -100,6 +106,12 @@ are extended through the body plan, and its vertical centerline and its buttock
 lines (`buttocks_positions`, to the right of the centerline for
 `sides="half"`, on both sides otherwise) are drawn
 (`Model.body_plan_grid_options`, `Model.plot_grid`).
+
+The waterlines are always part of the body lines when the table has them:
+`loft_body_lines` adds a point for every waterline of `waterlines_positions()`
+whose half-breadth row is in the table (the row name is the waterline name;
+override `Model.waterline_row(name)` if it differs, e.g. "WL 1" ->
+"Breadth WL 1"). The height is the position of the waterline.
 
 `Model.plot_body_lines(dxf, lines)` draws the body lines and writes the
 station name above the top end of every body line (`labels=False` to omit).

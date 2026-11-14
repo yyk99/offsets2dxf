@@ -26,6 +26,7 @@ import os
 
 import ezdxf
 import ezdxf.entities
+import ezdxf.units
 import ezdxf.enums
 import numpy
 import pandas
@@ -38,13 +39,19 @@ __version__ = "0.5.0"
 DEFAULT_OUT_DIR = "out"
 
 
-def output_dir_from_args(argv: list = None, description: str = None) -> str:
-    """Parse the command line of a script: ``[--out-dir DIR]``.
+def parse_script_args(argv: list = None, description: str = None):
+    """Parse the command line of a script:
+    ``[--out-dir DIR] [--output-units UNIT]``.
 
-    Returns the absolute path of the directory for the output files:
-    ``out`` in the current directory if not given (``DEFAULT_OUT_DIR``), a
-    relative ``DIR`` is also relative to the current directory. The directory
-    is created when a file is saved (see ``DXF.close``).
+    Returns the namespace with:
+
+    - ``out_dir`` - the absolute path of the directory for the output files:
+      ``out`` in the current directory if not given (``DEFAULT_OUT_DIR``); a
+      relative ``DIR`` is also relative to the current directory. The
+      directory is created when a file is saved (see ``DXF.close``);
+    - ``output_units`` - the unit of the coordinates in the .dxf files
+      (``inch``, ``ft``, ``mm``, ``cm`` or ``m``), None if not given: the unit
+      of the table is used (see ``Model.set_output_unit``).
     """
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
@@ -52,7 +59,21 @@ def output_dir_from_args(argv: list = None, description: str = None) -> str:
         default=DEFAULT_OUT_DIR,
         help="directory for the .dxf files (default: %(default)s)",
     )
-    return os.path.abspath(parser.parse_args(argv).out_dir)
+    parser.add_argument(
+        "--output-units",
+        choices=OUTPUT_UNITS,
+        default=None,
+        help="unit of the coordinates in the .dxf files "
+        "(default: the unit of the table of offsets)",
+    )
+    args = parser.parse_args(argv)
+    args.out_dir = os.path.abspath(args.out_dir)
+    return args
+
+
+def output_dir_from_args(argv: list = None, description: str = None) -> str:
+    """The ``out_dir`` of ``parse_script_args``."""
+    return parse_script_args(argv, description).out_dir
 
 
 class TableOfOffsets:
@@ -109,6 +130,10 @@ TableOfOffsets.UNITS = {
     "cm": 1.0 / 2.54,
     "m": 1000.0 / 25.4,
 }
+
+
+# Units of the coordinates in a .dxf file: the unit of the table, except "ftin".
+OUTPUT_UNITS = ("inch", "ft", "mm", "cm", "m")
 
 
 def offset_to_inches(value: str, unit: str = "ftin") -> float:
@@ -174,6 +199,7 @@ class Model:
         # x of the centerline of the body plan lofted last (loft_body_lines)
         self.body_plan_centerline_x = None
         self._bow_station = None
+        self._output_unit = None
         pass
 
     def set_bow_station(self, station: str):
@@ -207,6 +233,28 @@ class Model:
     def offset_to_inches(self, value: str) -> float:
         """Convert a cell of the table to inches, using the unit of the table."""
         return offset_to_inches(value, self._unit)
+
+    def set_output_unit(self, unit: str = None):
+        """Set the unit of the coordinates in the .dxf files (``OUTPUT_UNITS``).
+        None (the default) means the unit of the table (``"inch"`` for the
+        feet-inches-eighths tables)."""
+        if unit is not None and unit not in OUTPUT_UNITS:
+            raise ValueError(
+                "unknown output unit %r, expected one of %s" % (unit, OUTPUT_UNITS)
+            )
+        self._output_unit = unit
+
+    def output_unit(self) -> str:
+        """The unit of the coordinates in the .dxf files: the one set by
+        ``set_output_unit``, else the unit of the table."""
+        if self._output_unit is not None:
+            return self._output_unit
+        return "inch" if self._unit == "ftin" else self._unit
+
+    def open_dxf(self, filename_dxf: str):
+        """A ``DXF`` to write ``filename_dxf`` in the output unit. The model
+        itself works in inches; the coordinates are converted when drawn."""
+        return DXF(filename_dxf, unit=self.output_unit())
 
     def station_positions(self):
         """(virtual) Return ``{station_name: x_position}`` for every station column.
@@ -431,7 +479,9 @@ class Model:
     ):
         """Return ``{station: [polyline, ...]}``: the body lines of every station.
 
-        ``body_points`` is as for ``loft_body_line``. Points whose table cell is
+        ``body_points`` is as for ``loft_body_line``. The waterlines that are in
+        the table are always added (``waterline_body_points``). Points whose
+        table cell is
         empty (or not a plain offset) at a station are skipped. Every polyline
         is sorted from the top (sheer) down.
 
@@ -471,6 +521,8 @@ class Model:
             raise ValueError(
                 "unknown sides %r, expected one of %s" % (sides, self.BODY_SIDES)
             )
+
+        body_points = list(body_points) + self.waterline_body_points()
 
         positions = self.station_positions()
         if bow_station is None:
@@ -609,6 +661,24 @@ class Model:
             return max(positions.values()) + gap + left_extent
         return 0.0
 
+    def waterline_row(self, name: str) -> str:
+        """(virtual) The name of the table row with the half-breadths of the
+        waterline ``name`` (a key of ``waterlines_positions``). The default is
+        the same name."""
+        return name
+
+    def waterline_body_points(self) -> list:
+        """The waterlines as points of a body line: ``[(breadth_row, height)]``
+        for every waterline of ``waterlines_positions`` that has its row
+        (``waterline_row``) in the table. The half-breadth is from the table
+        and the height is the position of the waterline."""
+        rows = set(self._too["#"])
+        return [
+            (self.waterline_row(name), height)
+            for name, height in self.waterlines_positions().items()
+            if self.waterline_row(name) in rows
+        ]
+
     def line_to_index(self, line_id: str) -> int:
         """Return the row index of the line named line_id (the "#" column)"""
         names = list(self._too["#"])
@@ -671,6 +741,11 @@ class DXF:
     The file is saved when the ``with`` block exits. Layers: ``grid``,
     ``red`` (lofted lines), ``text``.
 
+    ``unit`` - the unit of the coordinates in the file (``OUTPUT_UNITS``,
+    default ``"inch"``). The coordinates given to the methods are in inches;
+    they are scaled to ``unit`` (and so are the text heights) and the unit is
+    stored in the file (``$INSUNITS``).
+
     ACI colors
     1: Red
     2: Yellow
@@ -681,9 +756,22 @@ class DXF:
     7: White or black
     """
 
-    def __init__(self, output_dxf: str):
+    def __init__(self, output_dxf: str, unit: str = "inch"):
+        if unit not in OUTPUT_UNITS:
+            raise ValueError(
+                "unknown output unit %r, expected one of %s" % (unit, OUTPUT_UNITS)
+            )
         self._output_dxf = output_dxf
+        self._unit = unit
+        self._scale = 1.0 / TableOfOffsets.UNITS[unit]  # inches -> unit
         self._doc = ezdxf.new("R2010")
+        self._doc.units = {
+            "inch": ezdxf.units.IN,
+            "ft": ezdxf.units.FT,
+            "mm": ezdxf.units.MM,
+            "cm": ezdxf.units.CM,
+            "m": ezdxf.units.M,
+        }[unit]
         self._msp = self._doc.modelspace()
         self._doc.layers.add(name="grid", color=6)
         self._doc.layers.add(name="red", color=1)
@@ -706,17 +794,21 @@ class DXF:
 
         return True
 
+    def _scaled(self, poly: list) -> list:
+        """The points (in inches) in the unit of the file"""
+        return [(x * self._scale, y * self._scale) for x, y in poly]
+
     def add_polyline(self, poly: list):
         """Add a 2D polyline ``[(x, y), ...]`` to the default layer."""
-        self._msp.add_polyline2d(poly)
+        self._msp.add_polyline2d(self._scaled(poly))
 
     def add_red_polyline(self, poly: list):
         """Add a 2D polyline to the ``red`` layer."""
-        self._msp.add_polyline2d(poly, dxfattribs={"layer": "red"})
+        self._msp.add_polyline2d(self._scaled(poly), dxfattribs={"layer": "red"})
 
     def add_grid_polyline(self, poly: list):
         """Add a 2D polyline to the ``grid`` layer."""
-        self._msp.add_polyline2d(poly, dxfattribs={"layer": "grid"})
+        self._msp.add_polyline2d(self._scaled(poly), dxfattribs={"layer": "grid"})
 
     def close(self):
         """Save the file (the directory is created if needed). Called
@@ -746,6 +838,9 @@ class DXF:
             "left": ezdxf.enums.TextEntityAlignment.LEFT,
             "center": ezdxf.enums.TextEntityAlignment.BOTTOM_CENTER,
         }[align]
-        self._msp.add_text(txt, height=1.0, dxfattribs={"layer": "text"}).set_placement(
-            xy, align=alignment
+        # the text is 1 inch high
+        self._msp.add_text(
+            txt, height=1.0 * self._scale, dxfattribs={"layer": "text"}
+        ).set_placement(
+            (xy[0] * self._scale, xy[1] * self._scale), align=alignment
         )

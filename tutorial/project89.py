@@ -16,7 +16,7 @@ Body plan placement (``body_placement``): ``"max_breadth"`` (default) puts the
 body lines in the middle of the profile view, ``"right"`` puts them to the
 right of it.
 
-Run: ``python3 project89.py [--out-dir DIR]`` writes, into ./out (in the
+Run: ``python3 project89.py [--out-dir DIR] [--output-units UNIT]`` writes, into ./out (in the
 current directory) or DIR, test_project89.dxf (everything),
 test_project89_body_right.dxf (body plan to the right),
 test_project89_body_split.dxf (aft/forward halves) and
@@ -115,25 +115,13 @@ class Project89(table_of_offsets.Model):
 
         Points are (half-breadth, height above the LWL) in inches.
         """
-        wl = {
-            "WL + 2'": 2 * 12.0,
-            "WL + 1'": 12.0,
-            'WL + 6"': 6.0,
-            "LWL": 0.0,
-            'WL - 6"': -6.0,
-            "WL - 1'": -12.0,
-            "WL - 2'": -24.0,
-            "WL - 3'": -36.0,
-            "WL - 4'": -4 * 12.0,
-        }
         # (breadth, height): a string is a table row, a number is inches
         body_points = [
             ("1/2w Deck", "Sheer"),
             ("Rabbet Plan", "Rabbet"),
             ("Profile Plan", "Profile"),
         ]
-        # waterlines: breadth from the table, height is the waterline
-        body_points += [(name, height) for name, height in wl.items()]
+        # the waterlines are added by loft_body_lines (waterlines_positions)
         # buttocks: height from the table, breadth is the buttock
         body_points += [(36.0, "B 3'"), (24.0, "B 2'"), (12.0, "B 1'")]
         return self.loft_body_lines(
@@ -144,7 +132,7 @@ class Project89(table_of_offsets.Model):
         self, filename_dxf: str, placement: str = "max_breadth", sides: str = None
     ):
         """Save the body lines only (no grid, no plan/profile lines)"""
-        with table_of_offsets.DXF(filename_dxf) as dxf:
+        with self.open_dxf(filename_dxf) as dxf:
             self.plot_body_lines(dxf, self.body_lines(placement, sides))
 
     def save_model_as(
@@ -160,7 +148,7 @@ class Project89(table_of_offsets.Model):
             # draw the body plan centerline
             grid_options = self.body_plan_grid_options(body_lines, body_sides)
 
-        with table_of_offsets.DXF(filename_dxf) as dxf:
+        with self.open_dxf(filename_dxf) as dxf:
             self.plot_grid(dxf, **grid_options)
 
             dxf.add_red_polyline(self.loft_line_n(0))
@@ -180,12 +168,14 @@ class Project89(table_of_offsets.Model):
             self.plot_body_lines(dxf, body_lines)
 
 if __name__ == "__main__":
-    out_dir = table_of_offsets.output_dir_from_args(description=__doc__)
+    args = table_of_offsets.parse_script_args(description=__doc__)
+    out_dir = args.out_dir
 
     def out(name):
         return os.path.join(out_dir, name)
 
     proj = Project89()
+    proj.set_output_unit(args.output_units)
     proj.save_model_as(out("test_project89.dxf"))
     print("Saved as:", out("test_project89.dxf"))
     # option 2: the body plan to the right of the profile view, clear of it

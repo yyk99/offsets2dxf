@@ -20,7 +20,7 @@ Assumptions (not in the table):
   waterlines are 250 mm apart: WL 1 at 800 mm ... WL 8 at 2550 mm. The
   diagonals are not drawn.
 
-Run: ``python3 project_ferrocement.py [--out-dir DIR]`` writes, into ./out (in
+Run: ``python3 project_ferrocement.py [--out-dir DIR] [--output-units UNIT]`` writes, into ./out (in
 the current directory) or DIR,
 test_project_ferrocement.dxf (everything), test_project_ferrocement_body_right.dxf
 (body plan to the right of the profile view),
@@ -78,6 +78,10 @@ class ProjectFerrocement(table_of_offsets.Model):
         """
         return (DRAUGHT_MM + (n - DWL_NUMBER) * WATERLINE_DISTANCE_MM) * MM
 
+    def waterline_row(self, name: str) -> str:
+        """the half-breadths of "WL n" are in the row "Breadth WL n"; DWL is WL 5"""
+        return "Breadth " + ("WL %d" % DWL_NUMBER if name == "DWL" else name)
+
     def waterlines_positions(self):
         """{name: height above the baseline} of the waterlines WL 1 .. WL 8"""
         return {
@@ -97,15 +101,14 @@ class ProjectFerrocement(table_of_offsets.Model):
         placement: str = "max_breadth",
         sides: str = None,
         bow_station: str = None,
-        waterlines: bool = False,
     ):
         """Return {station: [polyline, ...]}: the body plan lines.
 
         Points are (half-breadth, height above the baseline) in inches: the
-        sheer, the deck, the knuckle, the keel and the three buttocks, and
-        with ``waterlines=True`` the waterlines WL 1 - WL 8. The latter are
-        off by default: with the assumed heights they do not agree with the
-        buttocks (the sections zigzag), see the TODO in CLAUDE.md.
+        sheer, the deck, the knuckle, the keel, the three buttocks and the
+        waterlines WL 1 - WL 8. With the assumed waterline heights the points
+        do not agree with the buttocks, so the sections zigzag, see the TODO in
+        CLAUDE.md.
         """
         # (breadth, height): a string is a table row, a number is inches
         body_points = [
@@ -114,11 +117,7 @@ class ProjectFerrocement(table_of_offsets.Model):
             ("Breadth Knuckle", "Height Knuckle"),
             ("Breadth Keel", "Height Keel"),
         ]
-        if waterlines:
-            # the breadth is in the table, the height is not
-            body_points += [
-                ("Breadth WL %d" % n, self.waterline_height(n)) for n in WATERLINES
-            ]
+        # the waterlines are added by loft_body_lines (waterlines_positions)
         body_points += [
             (offset, "Height Buttock " + name[2:])
             for name, offset in self.buttocks_positions().items()
@@ -131,7 +130,7 @@ class ProjectFerrocement(table_of_offsets.Model):
         self, filename_dxf: str, placement: str = "max_breadth", sides: str = None
     ):
         """Save the body lines only (no grid, no plan/profile lines)"""
-        with table_of_offsets.DXF(filename_dxf) as dxf:
+        with self.open_dxf(filename_dxf) as dxf:
             self.plot_body_lines(dxf, self.body_lines(placement, sides))
 
     def save_model_as(
@@ -147,7 +146,7 @@ class ProjectFerrocement(table_of_offsets.Model):
             # and buttocks
             grid_options = self.body_plan_grid_options(body_lines, body_sides)
 
-        with table_of_offsets.DXF(filename_dxf) as dxf:
+        with self.open_dxf(filename_dxf) as dxf:
             self.plot_grid(dxf, **grid_options)
 
             # profile view
@@ -184,12 +183,14 @@ class ProjectFerrocement(table_of_offsets.Model):
 
 
 if __name__ == "__main__":
-    out_dir = table_of_offsets.output_dir_from_args(description=__doc__)
+    args = table_of_offsets.parse_script_args(description=__doc__)
+    out_dir = args.out_dir
 
     def out(name):
         return os.path.join(out_dir, name)
 
     proj = ProjectFerrocement()
+    proj.set_output_unit(args.output_units)
     proj.save_model_as(out("test_project_ferrocement.dxf"))
     print("Saved as:", out("test_project_ferrocement.dxf"))
     # the body plan to the right of the profile view, clear of it

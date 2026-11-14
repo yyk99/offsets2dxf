@@ -65,28 +65,61 @@ class Test_ProjectFerrocement(unittest.TestCase):
             self.assertAlmostEqual(250 * MM, upper - lower)
 
     def test_body_lines_with_waterlines(self):
-        without = self.project.body_lines("raw")["6"][0]
-        with_wl = self.project.body_lines("raw", waterlines=True)["6"][0]
-        self.assertEqual(len(without) + 8, len(with_wl))
+        """the waterlines are in the list of the body line points"""
+        (poly,) = self.project.body_lines("raw")["6"]
+        # sheer, deck, knuckle, keel, 3 buttocks and 8 waterlines
+        self.assertEqual(4 + 3 + 8, len(poly))
         # WL 5 at station 6: breadth 1480 mm at the draught
         self.assertIn(
             (round(1480 * MM, 6), round(1800 * MM, 6)),
-            [(round(x, 6), round(y, 6)) for x, y in with_wl],
+            [(round(x, 6), round(y, 6)) for x, y in poly],
         )
 
     def test_body_lines(self):
         lines = self.project.body_lines("raw")
         self.assertEqual(13, len(lines))
         (poly,) = lines["6"]
-        # the sheer is the top point
-        self.assertAlmostEqual(1562 * MM, poly[0][0])
-        self.assertAlmostEqual(2406 * MM, poly[0][1])
+        points = [(round(x / MM), round(y / MM)) for x, y in poly]
+        # the sheer is in the section: breadth 1562 mm, height 2406 mm
+        self.assertIn((1562, 2406), points)
+        # the highest point is WL 8 (2550 mm), which is above the sheer here
+        self.assertEqual((1562, 2550), points[0])
         heights = [y for _, y in poly]
         self.assertEqual(sorted(heights, reverse=True), heights)
         # the buttocks are in the section: 500, 1000 and 1500 mm
         xs = [round(x / MM) for x, _ in poly]
         for buttock in (500, 1000, 1500):
             self.assertIn(buttock, xs)
+
+    def test_output_in_mm(self):
+        """the default output unit is the unit of the table: millimetres"""
+        import ezdxf.units
+
+        self.assertEqual("mm", self.project.output_unit())
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "body.dxf")
+            self.project.save_body_lines_as(out, "raw", "half")
+            doc = ezdxf.readfile(out)
+            self.assertEqual(ezdxf.units.MM, doc.units)
+            red = [e for e in doc.modelspace() if e.dxf.layer == "red"]
+            pts = [tuple(p)[:2] for e in red for p in e.points()]
+            # the table values, in millimetres: the sheer at station 9 is
+            # 1535 mm out and 2644 mm high
+            self.assertTrue(
+                any(abs(x - 1535) < 1e-6 and abs(y - 2644) < 1e-6 for x, y in pts)
+            )
+            # another unit on request
+            self.project.set_output_unit("m")
+            self.project.save_body_lines_as(out, "raw", "half")
+            pts = [
+                tuple(p)[:2]
+                for e in ezdxf.readfile(out).modelspace()
+                if e.dxf.layer == "red"
+                for p in e.points()
+            ]
+            self.assertTrue(
+                any(abs(x - 1.535) < 1e-9 and abs(y - 2.644) < 1e-9 for x, y in pts)
+            )
 
     def test_generate_dxf(self):
         with tempfile.TemporaryDirectory() as tmp:

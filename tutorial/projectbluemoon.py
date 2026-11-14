@@ -6,7 +6,7 @@ e.g. "LWL to SHEER", "BASE TO B-2") and half-breadths (lower rows, e.g.
 "LWL to ..." heights are measured from the LWL, which is ``_y_lwl`` above the
 base. Station 8 and TRAN. are placed specially in ``station_positions``.
 
-Run: ``python3 projectbluemoon.py [--out-dir DIR]`` writes, into ./out (in the
+Run: ``python3 projectbluemoon.py [--out-dir DIR] [--output-units UNIT]`` writes, into ./out (in the
 current directory) or DIR, test_project_blue_moon.dxf (everything, body lines in
 the middle of the profile view), test_project_blue_moon_body_right.dxf (body
 plan to the right of the profile view), test_project_blue_moon_body_split.dxf
@@ -138,18 +138,12 @@ class ProjectBlueMoon(table_of_offsets.Model):
     ):
         """Return {station: polyline} with the body plan line of every station"""
         # (breadth, height) pairs. A string is a table row, a number is inches.
-        wl = self.waterlines_positions()
         body_points = [
             ("SHEER", "LWL to SHEER"),
             ("RABBET", "RABBET TO BASE"),
             ("KEEL", "KEEL TO BASE"),
             ("BALLAST TOP", "BASE TO TOP BAL."),
-            # waterlines: breadth from the table, height is the waterline
-            ("WL 2A", wl["WL 2A"]),
-            ("WL 1A", wl["WL 1A"]),
-            ("LWL", wl["LWL"]),
-            ("WL 1B", wl["WL 1B"]),
-            ("WL 2B", wl["WL 2B"]),
+            # the waterlines are added by loft_body_lines (waterlines_positions)
             # buttocks: height from the table, breadth is the buttock
             (36.0, "BASE TO B-3"),
             (24.0, "BASE TO B-2"),
@@ -163,7 +157,7 @@ class ProjectBlueMoon(table_of_offsets.Model):
         self, filename_dxf: str, placement: str = "max_breadth", sides: str = None
     ):
         """Save the body lines only (no grid, no plan/profile lines)"""
-        with table_of_offsets.DXF(filename_dxf) as dxf:
+        with self.open_dxf(filename_dxf) as dxf:
             self.plot_body_lines(dxf, self.body_lines(placement, sides))
 
     def save_model_as(
@@ -179,7 +173,7 @@ class ProjectBlueMoon(table_of_offsets.Model):
             # draw the body plan centerline
             grid_options = self.body_plan_grid_options(body_lines, body_sides)
 
-        with table_of_offsets.DXF(filename_dxf) as dxf:
+        with self.open_dxf(filename_dxf) as dxf:
             self.plot_grid(dxf, **grid_options)
 
             dxf.add_red_polyline(self.loft_line_n(0))
@@ -236,12 +230,14 @@ RED-CORRECTED,,,,,,,,,
 
 
 if __name__ == "__main__":
-    out_dir = table_of_offsets.output_dir_from_args(description=__doc__)
+    args = table_of_offsets.parse_script_args(description=__doc__)
+    out_dir = args.out_dir
 
     def out(name):
         return os.path.join(out_dir, name)
 
     proj = ProjectBlueMoon()
+    proj.set_output_unit(args.output_units)
     proj.save_model_as(out("test_project_blue_moon.dxf"))
     print("Saved as:", out("test_project_blue_moon.dxf"))
     # option 2: the body plan to the right of the profile view, clear of it

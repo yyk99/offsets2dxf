@@ -28,4 +28,5 @@ deck half-breadth is at most 1562 mm, the sheer is up to 2985 mm above the
 baseline), so the lines plan and the table may show different hulls.
 
 `tutorial/project_ferrocement.py` uses the draught and the waterline
-distance for the waterlines; see the assumptions in its docstring.
+distance for the waterlines (drawn in the profile view and used as points of
+the body lines); see the assumptions in its docstring.
