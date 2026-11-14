@@ -69,6 +69,26 @@ A CSV file. The first column (header `#`) holds line names (`Sheer`, `B 3'`,
    draw them with the `DXF` context manager.
    `projectbluemoon.py` is the most complete example.
 
+## BODY PLAN OPTIONS
+
+`Model.loft_body_lines(body_points, placement, sides)` (see
+`tutorial/projectbluemoon.py` and `tutorial/project89.py`):
+
+- `placement="max_breadth"` (default) - the body plan centerline is on the
+  station with the greatest breadth, in the middle of the profile view;
+  `"right"` - to the right of the profile view, clear of it;
+  `"raw"` - no shift.
+- `sides="half"` (default) - the half-breadth only; `"both"` - both halves of
+  every station; `"split"` - the usual body plan, aft stations to the left and
+  forward stations to the right of the centerline.
+
+With `placement="right"` the base line and the waterlines of the profile view
+are extended through the body plan and its vertical centerline is drawn
+(`Model.body_plan_grid_options`, `Model.plot_grid`).
+
+Each tutorial script writes the full drawing, a variant with the body plan to
+the right, a split one and a body-lines-only file.
+
 ## DOCUMENTATION OF THE CODE
 
 Module, class and method docstrings in `table_of_offsets.py`.

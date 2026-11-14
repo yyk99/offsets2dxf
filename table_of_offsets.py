@@ -101,6 +101,8 @@ class Model:
         self._filename_csv = _filename_csv
         self._too = pandas.read_csv(self._filename_csv)
         self._under_waterline = {}
+        # x of the centerline of the body plan lofted last (loft_body_lines)
+        self.body_plan_centerline_x = None
         pass
 
     def set_under_waterline(self, d: dict):
@@ -199,17 +201,40 @@ class Model:
         """return polyline for B3"""
         return self.loft_line_n(1)
 
-    def plot_grid(self, dxf: object):
+    def plot_grid(
+        self,
+        dxf: object,
+        profile_end_x: float = None,
+        body_centerline: tuple = None,
+    ):
         """Draw the grid into ``dxf`` (a ``DXF`` object): central lines, one
         vertical line and label per station, waterlines and buttocks lines.
+
+        ``profile_end_x`` - extend the base line (the first of
+        ``grid_y_origins``) and the waterlines, with their right labels, to
+        this x, e.g. to run through a body plan placed to the right of the
+        profile view. Ignored if it is not beyond the last station.
+
+        ``body_centerline`` - ``(x, bottom_y, top_y)``: draw the vertical
+        centerline of a body plan there. See ``body_plan_grid_options``.
         """
 
         stations = self.station_positions()
         xx = stations.values()
 
-        # Draw central line(s)
-        for y in self.grid_y_origins():
-            dxf.add_grid_polyline([(min(xx) - 12, y), (max(xx) + 12, y)])
+        right = max(xx) + 12
+        if profile_end_x is not None:
+            right = max(right, profile_end_x)
+
+        # Draw central line(s); the base line (the first one) is extended
+        for i, y in enumerate(self.grid_y_origins()):
+            y_right = right if i == 0 else max(xx) + 12
+            dxf.add_grid_polyline([(min(xx) - 12, y), (y_right, y)])
+
+        if body_centerline is not None:
+            x, bottom_y, top_y = body_centerline
+            dxf.add_grid_polyline([(x, bottom_y), (x, top_y)])
+            dxf.text((x + 1, top_y - 2), "CL")
 
         # draw station lines
         bottom_y, top_y = self.drawing_area_vertical_borders()
@@ -224,11 +249,12 @@ class Model:
                 dxf.text((x + 1, y + 1), s)
 
         # waterlines
+        wl_right = right
         for wl, wl_y in self.waterlines_positions().items():
             print("Waterline: ", wl, "at", wl_y)
-            dxf.add_grid_polyline([(min(xx) - 12, wl_y), (max(xx) + 12, wl_y)])
+            dxf.add_grid_polyline([(min(xx) - 12, wl_y), (wl_right, wl_y)])
             dxf.text((min(xx) - 12 + 1, wl_y + 1), wl)
-            dxf.text((max(xx) + 12 - 1, wl_y + 1), wl)
+            dxf.text((wl_right - 1, wl_y + 1), wl)
 
         # buttocks
         buttocks_origin = 0
@@ -289,19 +315,141 @@ class Model:
 
         return poly
 
-    def loft_body_lines(self, body_points: list):
-        """Return ``{station: polyline}``: the body line of every station.
+    BODY_PLACEMENTS = ("raw", "max_breadth", "right")
+    BODY_SIDES = ("half", "both", "split")
+
+    def loft_body_lines(
+        self,
+        body_points: list,
+        placement: str = "max_breadth",
+        gap: float = 24.0,
+        sides: str = "half",
+    ):
+        """Return ``{station: [polyline, ...]}``: the body lines of every station.
 
         ``body_points`` is as for ``loft_body_line``. Points whose table cell is
         empty (or not a plain offset) at a station are skipped. Every polyline
         is sorted from the top (sheer) down.
+
+        ``sides`` - which halves are drawn:
+
+        - ``"half"`` (default): the half-breadth to the right of the centerline;
+        - ``"both"``: both halves, mirrored about the centerline, as one
+          polyline per station (right sheer, down to the keel, up to the left
+          sheer);
+        - ``"split"``: the usual body plan. Stations aft of the midship (the
+          station with the greatest breadth) are drawn to the left of the
+          centerline, stations forward of it to the right. The midship station
+          is drawn on both sides. Aft means a smaller x in
+          ``station_positions`` (the bow is to the right, as in the plan view).
+
+        ``placement`` - where the centerline of the body plan is put along x
+        (heights are the same as in the profile view, so y is not changed):
+
+        - ``"max_breadth"`` (default): on the station with the greatest
+          breadth, i.e. in the middle of the profile view;
+        - ``"right"``: ``gap`` inches to the right of the last station, clear
+          of the profile view (the left half, if any, is clear as well);
+        - ``"raw"``: no shift, the centerline is at x = 0.
         """
-        lines = {}
-        for station in self.station_positions():
+        if placement not in self.BODY_PLACEMENTS:
+            raise ValueError(
+                "unknown placement %r, expected one of %s"
+                % (placement, self.BODY_PLACEMENTS)
+            )
+        if sides not in self.BODY_SIDES:
+            raise ValueError(
+                "unknown sides %r, expected one of %s" % (sides, self.BODY_SIDES)
+            )
+
+        positions = self.station_positions()
+        halves = {}
+        for station in positions:
             poly = self.loft_body_line(station, body_points, skip_missing=True)
             poly.sort(key=lambda pt: -pt[1])
-            lines[station] = poly
+            halves[station] = poly
+
+        widest = None
+        if any(halves.values()):
+            widest = max(
+                (s for s in halves if halves[s]),
+                key=lambda s: max(x for x, _ in halves[s]),
+            )
+
+        def mirrored(poly):
+            return [(-x, y) for x, y in poly]
+
+        lines = {}
+        for station, poly in halves.items():
+            if not poly:
+                lines[station] = []
+            elif sides == "half":
+                lines[station] = [poly]
+            elif sides == "both":
+                left = mirrored(poly)[::-1]
+                if poly[-1][0] == 0:
+                    left = left[1:]  # do not repeat a point on the centerline
+                lines[station] = [poly + left]
+            else:
+                right_side = station == widest or positions[station] >= positions[widest]
+                left_side = station == widest or positions[station] <= positions[widest]
+                lines[station] = []
+                if left_side:
+                    lines[station].append(mirrored(poly))
+                if right_side:
+                    lines[station].append(poly)
+
+        x0 = self.body_plan_origin_x(lines, placement, gap, widest)
+        self.body_plan_centerline_x = x0
+        if x0 != 0:
+            lines = {
+                s: [[(x + x0, y) for x, y in p] for p in polys]
+                for s, polys in lines.items()
+            }
         return lines
+
+    def body_plan_grid_options(self, lines: dict, margin: float = 12.0):
+        """Keyword arguments for ``plot_grid`` for a body plan placed to the
+        right of the profile view (``lines`` as returned by ``loft_body_lines``
+        with ``placement="right"``): the base line and the waterlines run
+        through the body plan, and its vertical centerline is drawn.
+        """
+        polylines = self.body_polylines(lines)
+        if not polylines or self.body_plan_centerline_x is None:
+            return {}
+        xs = [x for p in polylines for x, _ in p]
+        ys = [y for p in polylines for _, y in p]
+        return {
+            "profile_end_x": max(xs) + margin,
+            "body_centerline": (
+                self.body_plan_centerline_x,
+                min(ys) - margin,
+                max(ys) + margin,
+            ),
+        }
+
+    @staticmethod
+    def body_polylines(lines: dict):
+        """Flatten the result of ``loft_body_lines`` to a list of polylines."""
+        return [p for polys in lines.values() for p in polys if p]
+
+    def body_plan_origin_x(
+        self, lines: dict, placement: str, gap: float = 24.0, widest: str = None
+    ):
+        """x position of the body plan centerline for the given placement.
+
+        ``lines`` are the body lines relative to the centerline
+        (``{station: [polyline, ...]}``), ``widest`` is the station with the
+        greatest breadth.
+        """
+        positions = self.station_positions()
+        if placement == "max_breadth":
+            return positions[widest] if widest is not None else 0.0
+        if placement == "right":
+            xs = [x for polys in lines.values() for p in polys for x, _ in p]
+            left_extent = -min(xs) if xs and min(xs) < 0 else 0.0
+            return max(positions.values()) + gap + left_extent
+        return 0.0
 
     def line_to_index(self, line_id: str) -> int:
         """Return the row index of the line named line_id (the "#" column)"""

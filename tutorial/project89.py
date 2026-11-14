@@ -5,7 +5,16 @@ positive up. Half-breadths are the "1/2w Deck", "WL ..." and "... Plan" rows.
 Some cells hold two values ("0-2-0 and 0-3-0"); such points are skipped in the
 body lines.
 
-Run: ``python3 project89.py`` -> writes test_project89.dxf (everything) and
+Body plan sides (``body_sides``): ``"half"`` (default), ``"both"`` (both
+halves) or ``"split"`` (aft stations on the left, forward on the right).
+
+Body plan placement (``body_placement``): ``"max_breadth"`` (default) puts the
+body lines in the middle of the profile view, ``"right"`` puts them to the
+right of it.
+
+Run: ``python3 project89.py`` -> writes test_project89.dxf (everything),
+test_project89_body_right.dxf (body plan to the right),
+test_project89_body_split.dxf (aft/forward halves) and
 test_project89_body.dxf (body lines only).
 """
 
@@ -90,7 +99,7 @@ class Project89(table_of_offsets.Model):
         """(virtual) we want two horizontal grid lines"""
         return [0, 10 * 12.0]
 
-    def body_lines(self):
+    def body_lines(self, placement: str = "max_breadth", sides: str = "half"):
         """Return {station: polyline} with the body plan line of every station.
 
         Points are (half-breadth, height above the LWL) in inches.
@@ -116,17 +125,32 @@ class Project89(table_of_offsets.Model):
         body_points += [(name, height) for name, height in wl.items()]
         # buttocks: height from the table, breadth is the buttock
         body_points += [(36.0, "B 3'"), (24.0, "B 2'"), (12.0, "B 1'")]
-        return self.loft_body_lines(body_points)
+        return self.loft_body_lines(body_points, placement, sides=sides)
 
-    def save_body_lines_as(self, filename_dxf: str):
+    def save_body_lines_as(
+        self, filename_dxf: str, placement: str = "max_breadth", sides: str = "half"
+    ):
         """Save the body lines only (no grid, no plan/profile lines)"""
         with table_of_offsets.DXF(filename_dxf) as dxf:
-            for poly in self.body_lines().values():
+            for poly in self.body_polylines(self.body_lines(placement, sides)):
                 dxf.add_red_polyline(poly)
 
-    def save_model_as(self, filename_dxf: str):
+    def save_model_as(
+        self,
+        filename_dxf: str,
+        body_placement: str = "max_breadth",
+        body_sides: str = "half",
+    ):
+        body_lines = self.body_lines(body_placement, body_sides)
+        polylines = self.body_polylines(body_lines)
+        grid_options = {}
+        if body_placement == "right":
+            # run the base line and the waterlines through the body plan,
+            # draw the body plan centerline
+            grid_options = self.body_plan_grid_options(body_lines)
+
         with table_of_offsets.DXF(filename_dxf) as dxf:
-            self.plot_grid(dxf)
+            self.plot_grid(dxf, **grid_options)
 
             dxf.add_red_polyline(self.loft_line_n(0))
             dxf.add_red_polyline(self.loft_line_n(1))
@@ -142,13 +166,19 @@ class Project89(table_of_offsets.Model):
             dxf.add_red_polyline(self.loft_line_n(11))
             dxf.add_red_polyline(self.loft_line_n(12))
 
-            for poly in self.body_lines().values():
+            for poly in polylines:
                 dxf.add_red_polyline(poly)
 
 if __name__ == "__main__":
     proj = Project89()
     proj.save_model_as("test_project89.dxf")
     print("Saved as:", os.path.abspath("test_project89.dxf"))
+    # option 2: the body plan to the right of the profile view, clear of it
+    proj.save_model_as("test_project89_body_right.dxf", body_placement="right")
+    # the usual body plan: aft stations left, forward stations right
+    proj.save_model_as(
+        "test_project89_body_split.dxf", body_placement="right", body_sides="split"
+    )
     proj.save_body_lines_as("test_project89_body.dxf")
     print("Saved as:", os.path.abspath("test_project89_body.dxf"))
 

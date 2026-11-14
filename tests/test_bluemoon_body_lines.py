@@ -28,13 +28,14 @@ class Test_BlueMoonBodyLines(unittest.TestCase):
         self.assertEqual(
             ["1", "2", "3", "4", "5", "6", "7", "8", "TRAN."], list(lines.keys())
         )
-        for station, poly in lines.items():
+        for station, polys in lines.items():
+            (poly,) = polys
             self.assertGreater(len(poly), 2, station)
             heights = [y for _, y in poly]
             self.assertEqual(sorted(heights, reverse=True), heights, station)
 
     def test_station_5_sheer_point(self):
-        poly = self.project.body_lines()["5"]
+        (poly,) = self.project.body_lines("raw")["5"]
         # SHEER breadth 4-4-0 == 52.0; LWL to SHEER 2-0-3 + LWL above base 4-1-7
         top = poly[0]
         self.assertEqual(52.0, top[0])
@@ -48,7 +49,7 @@ class Test_BlueMoonBodyLines(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = os.path.join(tmp, "blue_moon_body.dxf")
             with table_of_offsets.DXF(out) as dxf:
-                for poly in self.project.body_lines().values():
+                for poly in self.project.body_polylines(self.project.body_lines()):
                     dxf.add_red_polyline(poly)
             self.assertTrue(os.path.exists(out))
             doc = ezdxf.readfile(out)

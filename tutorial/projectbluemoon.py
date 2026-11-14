@@ -7,8 +7,9 @@ e.g. "LWL to SHEER", "BASE TO B-2") and half-breadths (lower rows, e.g.
 base. Station 8 and TRAN. are placed specially in ``station_positions``.
 
 Run: ``python3 projectbluemoon.py`` (from tutorial/) writes
-test_project_blue_moon.dxf (everything) and
-test_project_blue_moon_body.dxf (body lines only).
+test_project_blue_moon.dxf (everything, body lines in the middle of the profile
+view), test_project_blue_moon_body_right.dxf (body plan to the right of the
+profile view), test_project_blue_moon_body_split.dxf (aft/forward halves) and test_project_blue_moon_body.dxf (body lines only).
 """
 
 import context
@@ -127,7 +128,7 @@ class ProjectBlueMoon(table_of_offsets.Model):
 
     # {'LWL to SHEER': 0, 'LWL to DECK EDG': 1, 'BASE TO B-3': 2, 'BASE TO B-2': 3, 'BASE TO B-1': 4, 'RABBET TO BASE': 5, 'KEEL TO BASE': 6, 'CENTERLINE SHAFT': 7, 'BASE TO TOP BAL.': 8, 'SHEER': 9, 'WL 2A': 10, 'WL 1A': 11, 'LWL': 12, 'WL 1B': 13, 'WL 2B': 14, 'RABBET': 15, 'KEEL': 16, 'BALLAST TOP': 17, 'D. UPPER': 18, 'D. LOWER': 19, nan: 20, 'RED-CORRECTED': 21}
 
-    def body_lines(self):
+    def body_lines(self, placement: str = "max_breadth", sides: str = "half"):
         """Return {station: polyline} with the body plan line of every station"""
         # (breadth, height) pairs. A string is a table row, a number is inches.
         wl = self.waterlines_positions()
@@ -147,17 +148,32 @@ class ProjectBlueMoon(table_of_offsets.Model):
             (24.0, "BASE TO B-2"),
             (12.0, "BASE TO B-1"),
         ]
-        return self.loft_body_lines(body_points)
+        return self.loft_body_lines(body_points, placement, sides=sides)
 
-    def save_body_lines_as(self, filename_dxf: str):
+    def save_body_lines_as(
+        self, filename_dxf: str, placement: str = "max_breadth", sides: str = "half"
+    ):
         """Save the body lines only (no grid, no plan/profile lines)"""
         with table_of_offsets.DXF(filename_dxf) as dxf:
-            for poly in self.body_lines().values():
+            for poly in self.body_polylines(self.body_lines(placement, sides)):
                 dxf.add_red_polyline(poly)
 
-    def save_model_as(self, filename_dxf: str):
+    def save_model_as(
+        self,
+        filename_dxf: str,
+        body_placement: str = "max_breadth",
+        body_sides: str = "half",
+    ):
+        body_lines = self.body_lines(body_placement, body_sides)
+        polylines = self.body_polylines(body_lines)
+        grid_options = {}
+        if body_placement == "right":
+            # run the base line and the waterlines through the body plan,
+            # draw the body plan centerline
+            grid_options = self.body_plan_grid_options(body_lines)
+
         with table_of_offsets.DXF(filename_dxf) as dxf:
-            self.plot_grid(dxf)
+            self.plot_grid(dxf, **grid_options)
 
             dxf.add_red_polyline(self.loft_line_n(0))
             dxf.add_red_polyline(self.loft_line_n(1))
@@ -209,7 +225,7 @@ D. LOWER,,1-0-0,1-9-3,2-1-5,2-1-6,2-2-4,0-10-7,,
 RED-CORRECTED,,,,,,,,,
             """
 
-            for poly in self.body_lines().values():
+            for poly in polylines:
                 dxf.add_red_polyline(poly)
 
 
@@ -217,6 +233,14 @@ if __name__ == "__main__":
     proj = ProjectBlueMoon()
     proj.save_model_as("test_project_blue_moon.dxf")
     print("Saved as:", os.path.abspath("test_project_blue_moon.dxf"))
+    # option 2: the body plan to the right of the profile view, clear of it
+    proj.save_model_as("test_project_blue_moon_body_right.dxf", body_placement="right")
+    # the usual body plan: aft stations left, forward stations right
+    proj.save_model_as(
+        "test_project_blue_moon_body_split.dxf",
+        body_placement="right",
+        body_sides="split",
+    )
     proj.save_body_lines_as("test_project_blue_moon_body.dxf")
     print("Saved as:", os.path.abspath("test_project_blue_moon_body.dxf"))
 
