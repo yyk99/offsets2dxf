@@ -7,8 +7,10 @@ body lines.
 
 The bow is station 0 (``set_bow_station``); the stern, station 33, is at x = 0.
 
-Body plan sides (``body_sides``): ``"half"`` (default), ``"both"`` (both
-halves) or ``"split"`` (aft stations on the left, forward on the right).
+Body plan sides (``body_sides``): ``"half"``, ``"both"`` (both halves) or
+``"split"`` (aft stations on the left, forward on the right). The default is
+``"split"`` for the body plan in the middle of the profile view and ``"half"``
+for the others.
 
 Body plan placement (``body_placement``): ``"max_breadth"`` (default) puts the
 body lines in the middle of the profile view, ``"right"`` puts them to the
@@ -105,7 +107,7 @@ class Project89(table_of_offsets.Model):
     def body_lines(
         self,
         placement: str = "max_breadth",
-        sides: str = "half",
+        sides: str = None,
         bow_station: str = None,
     ):
         """Return {station: polyline} with the body plan line of every station.
@@ -138,7 +140,7 @@ class Project89(table_of_offsets.Model):
         )
 
     def save_body_lines_as(
-        self, filename_dxf: str, placement: str = "max_breadth", sides: str = "half"
+        self, filename_dxf: str, placement: str = "max_breadth", sides: str = None
     ):
         """Save the body lines only (no grid, no plan/profile lines)"""
         with table_of_offsets.DXF(filename_dxf) as dxf:
@@ -149,7 +151,7 @@ class Project89(table_of_offsets.Model):
         self,
         filename_dxf: str,
         body_placement: str = "max_breadth",
-        body_sides: str = "half",
+        body_sides: str = None,
     ):
         body_lines = self.body_lines(body_placement, body_sides)
         polylines = self.body_polylines(body_lines)

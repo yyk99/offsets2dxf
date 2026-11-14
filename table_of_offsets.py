@@ -5,10 +5,13 @@ A table of offsets is a CSV file:
 - the first column (header ``#``) holds the line names, one per row
   (e.g. ``Sheer``, ``B 3'``, ``LWL``);
 - the other columns are stations (e.g. ``33``, ``32`` ... ``0``, or ``TRAN.``);
-- a cell holds an offset in feet-inches-eighths, e.g. ``1-10-2``
-  (see ``TableOfOffsets.offset2double``); an empty cell means "no point".
+- a cell holds an offset, by default in feet-inches-eighths, e.g. ``1-10-2``
+  (see ``TableOfOffsets.offset2double``), or a plain number in the unit given
+  to ``Model`` (``unit="mm"``, see ``TableOfOffsets.UNITS``); an empty cell
+  means "no point".
 
-All lengths in this module are in inches (see ``Model.units``).
+All lengths inside this module are in inches (see ``Model.units``), whatever
+the unit of the table.
 
 Classes:
 
@@ -72,6 +75,35 @@ class TableOfOffsets:
         return d + delta
 
 
+# Units of the offsets in a table: the number of inches in one unit.
+# "ftin" is the special feet-inches-eighths notation, see offset2double.
+TableOfOffsets.UNITS = {
+    "ftin": None,
+    "inch": 1.0,
+    "ft": 12.0,
+    "mm": 1.0 / 25.4,
+    "cm": 1.0 / 2.54,
+    "m": 1000.0 / 25.4,
+}
+
+
+def offset_to_inches(value: str, unit: str = "ftin") -> float:
+    """Convert an offset from a table cell to inches.
+
+    unit - one of ``TableOfOffsets.UNITS``: ``"ftin"`` (default) is the
+    ``feet-inches-eighths`` notation, the others are plain numbers, e.g.
+    ``offset_to_inches("1290", "mm")`` -> 50.79...
+    Raises ValueError for an unknown unit or a malformed value.
+    """
+    if unit not in TableOfOffsets.UNITS:
+        raise ValueError(
+            "unknown unit %r, expected one of %s" % (unit, list(TableOfOffsets.UNITS))
+        )
+    if unit == "ftin":
+        return TableOfOffsets.offset2double(value)
+    return float(value) * TableOfOffsets.UNITS[unit]
+
+
 class Model:
     """A boat's table of offsets (loaded from CSV) and the geometry lofted from it.
 
@@ -97,9 +129,23 @@ class Model:
             dxf.add_red_polyline(boat.loft_line_n(0))
     """
 
-    def __init__(self: object, _filename_csv: str):
+    def __init__(self: object, _filename_csv: str, unit: str = "ftin"):
+        """Load the table of offsets from ``_filename_csv``.
+
+        unit - the unit of the offsets in the table, one of
+        ``TableOfOffsets.UNITS``: ``"ftin"`` (default, feet-inches-eighths),
+        ``"inch"``, ``"ft"``, ``"mm"``, ``"cm"`` or ``"m"``. Everything the
+        model returns is in inches.
+        """
+        if unit not in TableOfOffsets.UNITS:
+            raise ValueError(
+                "unknown unit %r, expected one of %s"
+                % (unit, list(TableOfOffsets.UNITS))
+            )
+        self._unit = unit
         self._filename_csv = _filename_csv
-        self._too = pandas.read_csv(self._filename_csv)
+        # read the cells as text: the numbers are converted by offset_to_inches
+        self._too = pandas.read_csv(self._filename_csv, dtype=str)
         self._under_waterline = {}
         # x of the centerline of the body plan lofted last (loft_body_lines)
         self.body_plan_centerline_x = None
@@ -129,6 +175,14 @@ class Model:
     def units(self):
         """Name of the length unit used for all returned values."""
         return "inch"
+
+    def offsets_unit(self):
+        """The unit of the offsets in the CSV table (the ``unit`` argument)."""
+        return self._unit
+
+    def offset_to_inches(self, value: str) -> float:
+        """Convert a cell of the table to inches, using the unit of the table."""
+        return offset_to_inches(value, self._unit)
 
     def station_positions(self):
         """(virtual) Return ``{station_name: x_position}`` for every station column.
@@ -195,7 +249,7 @@ class Model:
                 s = self.offset_sign(pos, line_name)
                 off = self.base_offset(line_name)
                 poly_line.append(
-                    (stations[pos], s * TableOfOffsets.offset2double(offset) + off)
+                    (stations[pos], s * self.offset_to_inches(offset) + off)
                 )
 
         return poly_line
@@ -348,7 +402,7 @@ class Model:
         body_points: list,
         placement: str = "max_breadth",
         gap: float = 24.0,
-        sides: str = "half",
+        sides: str = None,
         bow_station: str = None,
     ):
         """Return ``{station: [polyline, ...]}``: the body lines of every station.
@@ -357,9 +411,11 @@ class Model:
         empty (or not a plain offset) at a station are skipped. Every polyline
         is sorted from the top (sheer) down.
 
-        ``sides`` - which halves are drawn:
+        ``sides`` - which halves are drawn. The default (None) is ``"split"``
+        for ``placement="max_breadth"``, i.e. for a body plan in the middle of
+        the profile view, and ``"half"`` otherwise (see ``body_plan_sides``):
 
-        - ``"half"`` (default): the half-breadth to the right of the centerline;
+        - ``"half"``: the half-breadth to the right of the centerline;
         - ``"both"``: both halves, mirrored about the centerline, as one
           polyline per station (right sheer, down to the keel, up to the left
           sheer);
@@ -386,6 +442,7 @@ class Model:
                 "unknown placement %r, expected one of %s"
                 % (placement, self.BODY_PLACEMENTS)
             )
+        sides = self.body_plan_sides(placement, sides)
         if sides not in self.BODY_SIDES:
             raise ValueError(
                 "unknown sides %r, expected one of %s" % (sides, self.BODY_SIDES)
@@ -452,8 +509,17 @@ class Model:
             }
         return lines
 
+    @staticmethod
+    def body_plan_sides(placement: str, sides: str = None):
+        """The sides to draw: ``sides`` if given, otherwise ``"split"`` for a
+        body plan in the middle of the profile view (``"max_breadth"``) and
+        ``"half"`` for the others."""
+        if sides is not None:
+            return sides
+        return "split" if placement == "max_breadth" else "half"
+
     def body_plan_grid_options(
-        self, lines: dict, sides: str = "half", margin: float = 12.0
+        self, lines: dict, sides: str = None, margin: float = 12.0
     ):
         """Keyword arguments for ``plot_grid`` for a body plan placed to the
         right of the profile view (``lines`` as returned by ``loft_body_lines``
@@ -469,6 +535,7 @@ class Model:
         cl = self.body_plan_centerline_x
         xs = [x for p in polylines for x, _ in p]
         ys = [y for p in polylines for _, y in p]
+        sides = self.body_plan_sides("right", sides)
         buttocks = {}
         for name, offset in self.buttocks_positions().items():
             buttocks[name] = [cl + offset]
@@ -528,7 +595,7 @@ class Model:
             raise ValueError(
                 "no offset for line %r at station %r" % (line_id, station_id)
             )
-        value = TableOfOffsets.offset2double(offset)
+        value = self.offset_to_inches(offset)
         if not vertical:
             # base_offset() positions lines on the drawing sheet (vertical only)
             return value

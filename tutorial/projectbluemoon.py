@@ -132,7 +132,7 @@ class ProjectBlueMoon(table_of_offsets.Model):
     def body_lines(
         self,
         placement: str = "max_breadth",
-        sides: str = "half",
+        sides: str = None,
         bow_station: str = None,
     ):
         """Return {station: polyline} with the body plan line of every station"""
@@ -159,7 +159,7 @@ class ProjectBlueMoon(table_of_offsets.Model):
         )
 
     def save_body_lines_as(
-        self, filename_dxf: str, placement: str = "max_breadth", sides: str = "half"
+        self, filename_dxf: str, placement: str = "max_breadth", sides: str = None
     ):
         """Save the body lines only (no grid, no plan/profile lines)"""
         with table_of_offsets.DXF(filename_dxf) as dxf:
@@ -170,7 +170,7 @@ class ProjectBlueMoon(table_of_offsets.Model):
         self,
         filename_dxf: str,
         body_placement: str = "max_breadth",
-        body_sides: str = "half",
+        body_sides: str = None,
     ):
         body_lines = self.body_lines(body_placement, body_sides)
         polylines = self.body_polylines(body_lines)

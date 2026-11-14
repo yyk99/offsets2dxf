@@ -55,6 +55,12 @@ A CSV file. The first column (header `#`) holds line names (`Sheer`, `B 3'`,
 - `1-10-2` = 1 ft 10 in 2/8 in = 22.25 in; `0-1` = 1 in; `1` = 12 in
 - a trailing `+` / `-` adds / subtracts 1/16 in: `0-0-1+` = 0.1875 in
 - all lengths inside the program are inches
+- a table in another unit (plain numbers, e.g. millimetres, empty cell for a
+  dash) is read with the `unit` option: `Model(csv, unit="mm")`. Units:
+  `"ftin"` (default, feet-inches-eighths), `"inch"`, `"ft"`, `"mm"`, `"cm"`,
+  `"m"`. The table is kept as it is in the source; the values are converted
+  to inches when they are read. See
+  `tutorial/project_ferrocement.py` (`sample_data/a_ferrocement_hull/`).
 
 ## ADDING A NEW BOAT
 
@@ -78,12 +84,15 @@ A CSV file. The first column (header `#`) holds line names (`Sheer`, `B 3'`,
   station with the greatest breadth, in the middle of the profile view;
   `"right"` - to the right of the profile view, clear of it;
   `"raw"` - no shift.
-- `sides="half"` (default) - the half-breadth only; `"both"` - both halves of
-  every station; `"split"` - the usual body plan, aft stations to the left and
+- `sides` - `"half"`: the half-breadth only; `"both"`: both halves of
+  every station; `"split"`: the usual body plan, aft stations to the left and
   forward stations to the right of the centerline. The bow end is given by
   `Model.set_bow_station("<station>")` (or the `bow_station` argument); if it
-  is not set, the bow is the end with the greater x. Both tutorial projects set
+  is not set, the bow is the end with the greater x. The tutorial projects set
   it in `__init__`.
+  The default is `"split"` for a body plan in the middle of the profile view
+  (`placement="max_breadth"`) and `"half"` otherwise (`Model.body_plan_sides`);
+  pass `sides` to choose another one.
 
 With `placement="right"` the base line and the waterlines of the profile view
 are extended through the body plan, and its vertical centerline and its buttock

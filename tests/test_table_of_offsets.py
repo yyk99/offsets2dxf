@@ -129,6 +129,30 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class Test_Units(unittest.TestCase):
+    def test_offset_to_inches(self):
+        f = table_of_offsets.offset_to_inches
+        self.assertEqual(22.25, f("1-10-2"))  # the default is feet-inches-eighths
+        self.assertEqual(22.25, f("1-10-2", "ftin"))
+        self.assertEqual(2.5, f("2.5", "inch"))
+        self.assertEqual(24.0, f("2", "ft"))
+        self.assertAlmostEqual(50.0, f("1270", "mm"))
+        self.assertAlmostEqual(50.0, f("127", "cm"))
+        self.assertAlmostEqual(39.37007874, f("1", "m"))
+        with self.assertRaises(ValueError):
+            f("1", "furlong")
+        with self.assertRaises(ValueError):
+            f("abc", "mm")
+
+    def test_model_unit(self):
+        csv = os.path.join(source_directory, "sample_data", "offset_table.csv")
+        model = table_of_offsets.Model(csv)
+        self.assertEqual("ftin", model.offsets_unit())
+        self.assertEqual("inch", model.units())
+        with self.assertRaises(ValueError):
+            table_of_offsets.Model(csv, unit="furlong")
+
+
 class Test_BodyLine(unittest.TestCase):
     """breadth_at / height_at / loft_body_line on sample_data/offset_table.csv"""
 
