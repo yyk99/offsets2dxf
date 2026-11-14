@@ -132,8 +132,7 @@ class ProjectFerrocement(table_of_offsets.Model):
     ):
         """Save the body lines only (no grid, no plan/profile lines)"""
         with table_of_offsets.DXF(filename_dxf) as dxf:
-            for poly in self.body_polylines(self.body_lines(placement, sides)):
-                dxf.add_red_polyline(poly)
+            self.plot_body_lines(dxf, self.body_lines(placement, sides))
 
     def save_model_as(
         self,
@@ -181,8 +180,7 @@ class ProjectFerrocement(table_of_offsets.Model):
                 dxf.add_red_polyline(self.loft_line_n(self.line_to_index(name)))
 
             # body plan
-            for poly in self.body_polylines(body_lines):
-                dxf.add_red_polyline(poly)
+            self.plot_body_lines(dxf, body_lines)
 
 
 if __name__ == "__main__":

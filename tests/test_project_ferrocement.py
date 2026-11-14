@@ -100,7 +100,8 @@ class Test_ProjectFerrocement(unittest.TestCase):
             doc = ezdxf.readfile(out)
             # the default is split: one polyline per station, two for the
             # midship station
-            self.assertEqual(14, len([e for e in doc.modelspace()]))
+            red = [e for e in doc.modelspace() if e.dxf.layer == "red"]
+            self.assertEqual(14, len(red))
 
 
 if __name__ == "__main__":

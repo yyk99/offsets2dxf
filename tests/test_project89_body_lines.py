@@ -194,6 +194,29 @@ class Test_Project89BodyLines(unittest.TestCase):
             texts = [e.dxf.text for e in doc.modelspace() if e.dxftype() == "TEXT"]
             self.assertNotIn("CL", texts)
 
+    def test_station_labels(self):
+        """every body line has its station name above its top end"""
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "p89_body.dxf")
+            self.project.save_body_lines_as(out)
+            doc = ezdxf.readfile(out)
+            red = [e for e in doc.modelspace() if e.dxf.layer == "red"]
+            texts = [e for e in doc.modelspace() if e.dxftype() == "TEXT"]
+            self.assertEqual(len(red), len(texts))
+
+            lines = self.project.body_lines()
+            expected = sorted(
+                (station, round(max(p, key=lambda pt: pt[1])[0], 3),
+                 round(max(p, key=lambda pt: pt[1])[1] + 1, 3))
+                for station, polys in lines.items()
+                for p in polys
+            )
+            actual = sorted(
+                (e.dxf.text, round(e.dxf.align_point.x, 3), round(e.dxf.align_point.y, 3))
+                for e in texts
+            )
+            self.assertEqual(expected, actual)
+
     def test_generate_dxf(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = os.path.join(tmp, "project89_body.dxf")

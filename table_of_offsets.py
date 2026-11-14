@@ -571,6 +571,21 @@ class Model:
             "body_buttocks": buttocks,
         }
 
+    def plot_body_lines(self, dxf: object, lines: dict, labels: bool = True):
+        """Draw the body lines (as returned by ``loft_body_lines``) into
+        ``dxf``. With ``labels`` the station name is written above the top end
+        of every body line.
+        """
+        for station, polys in lines.items():
+            for poly in polys:
+                if not poly:
+                    continue
+                dxf.add_red_polyline(poly)
+                if labels:
+                    # the highest point; the polylines run from the top down
+                    x, y = max(poly, key=lambda pt: pt[1])
+                    dxf.text((x, y + 1), station, align="center")
+
     @staticmethod
     def body_polylines(lines: dict):
         """Flatten the result of ``loft_body_lines`` to a list of polylines."""
@@ -714,8 +729,11 @@ class DXF:
             self._doc = None
             self._msp = None
 
-    def text(self, xy: tuple, txt: str):
+    def text(self, xy: tuple, txt: str, align: str = "left"):
         """Add text to the ``text`` layer
+
+        align - ``"left"`` (``xy`` is the bottom left corner of the text) or
+        ``"center"`` (``xy`` is the middle of the bottom of the text).
 
         # Using a predefined text style:
         msp.add_text(
@@ -724,6 +742,10 @@ class DXF:
             dxfattribs={"style": "LiberationSerif"}
         ).set_placement((2, 6), align=TextEntityAlignment.LEFT)
         """
+        alignment = {
+            "left": ezdxf.enums.TextEntityAlignment.LEFT,
+            "center": ezdxf.enums.TextEntityAlignment.BOTTOM_CENTER,
+        }[align]
         self._msp.add_text(txt, height=1.0, dxfattribs={"layer": "text"}).set_placement(
-            xy, align=ezdxf.enums.TextEntityAlignment.LEFT
+            xy, align=alignment
         )

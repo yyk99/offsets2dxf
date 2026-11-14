@@ -101,6 +101,9 @@ lines (`buttocks_positions`, to the right of the centerline for
 `sides="half"`, on both sides otherwise) are drawn
 (`Model.body_plan_grid_options`, `Model.plot_grid`).
 
+`Model.plot_body_lines(dxf, lines)` draws the body lines and writes the
+station name above the top end of every body line (`labels=False` to omit).
+
 Each tutorial script writes the full drawing, a variant with the body plan to
 the right, a split one and a body-lines-only file.
 

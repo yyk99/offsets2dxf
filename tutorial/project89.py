@@ -145,8 +145,7 @@ class Project89(table_of_offsets.Model):
     ):
         """Save the body lines only (no grid, no plan/profile lines)"""
         with table_of_offsets.DXF(filename_dxf) as dxf:
-            for poly in self.body_polylines(self.body_lines(placement, sides)):
-                dxf.add_red_polyline(poly)
+            self.plot_body_lines(dxf, self.body_lines(placement, sides))
 
     def save_model_as(
         self,
@@ -155,7 +154,6 @@ class Project89(table_of_offsets.Model):
         body_sides: str = None,
     ):
         body_lines = self.body_lines(body_placement, body_sides)
-        polylines = self.body_polylines(body_lines)
         grid_options = {}
         if body_placement == "right":
             # run the base line and the waterlines through the body plan,
@@ -179,8 +177,7 @@ class Project89(table_of_offsets.Model):
             dxf.add_red_polyline(self.loft_line_n(11))
             dxf.add_red_polyline(self.loft_line_n(12))
 
-            for poly in polylines:
-                dxf.add_red_polyline(poly)
+            self.plot_body_lines(dxf, body_lines)
 
 if __name__ == "__main__":
     out_dir = table_of_offsets.output_dir_from_args(description=__doc__)
