@@ -16,7 +16,7 @@ Converts a boat's lines plan "table of offsets" (CSV, values in feet-inches-eigh
 
     black .                                  # formatter (format-on-save in VS Code)
 
-Tutorial scripts (e.g. `tutorial/project89.py`) are run directly and write `.dxf` files; the checked-in `test_*.dxf` files in the repo root are such outputs.
+Tutorial scripts (e.g. `tutorial/project89.py`) are run directly and write `.dxf` files into `./out` in the current directory (git-ignored; `--out-dir DIR` to change, see `table_of_offsets.output_dir_from_args`; `DXF.close` creates the directory).
 
 ## Architecture
 
@@ -34,7 +34,7 @@ Tutorial scripts (e.g. `tutorial/project89.py`) are run directly and write `.dxf
 - Ferrocement body lines (`tutorial/project_ferrocement.py`) look strange; left as is for now. Suspects, none verified:
   - the transcription of `sample_data/a_ferrocement_hull/offset_table.csv` has not been checked against the GIF (e.g. `Breadth WL 3` at station 3 is 774 after 124 at station 2);
   - assumed layout: stations 1000 mm apart, `T` at x = 0, buttocks 500 mm apart;
-  - the waterline heights are not in the table, so the body lines use only sheer, deck, knuckle, keel and the three buttocks (the points are sorted by height, which may zigzag);
+  - the waterline heights are not in the table; they are derived from the draught (1800 mm = DWL = WL 5) and the 250 mm spacing (WL 1 = 800 ... WL 8 = 2550). With `body_lines(waterlines=True)` the sections zigzag because the waterline points do not agree with the buttock heights (e.g. station 6: WL 1 at 800 mm has a breadth of 161 mm but Buttock I, 500 mm out, is only 552 mm high), so the body lines use only sheer, deck, knuckle, keel and the buttocks by default. The draught and the spacing come from the lines plan, whose characteristics (B = 4.28 m, depth 1.99 m) do not match the offsets table (deck half-breadth 1562 mm, sheer up to 2985 mm), so the two images may show different hulls;
   - the diagonals (Height Diagonal A-C) are not used.
 
 ## Data

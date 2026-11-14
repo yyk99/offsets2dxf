@@ -50,6 +50,30 @@ class Test_ProjectFerrocement(unittest.TestCase):
         self.assertAlmostEqual(1000 * MM, positions["1"])
         self.assertAlmostEqual(12000 * MM, positions["12"])
 
+    def test_waterlines(self):
+        # the draught is 1800 mm: the design waterline, WL 5, is at 1800 mm;
+        # the waterlines are 250 mm apart
+        wl = self.project.waterlines_positions()
+        self.assertEqual(
+            ["WL 1", "WL 2", "WL 3", "WL 4", "DWL", "WL 6", "WL 7", "WL 8"], list(wl)
+        )
+        self.assertAlmostEqual(1800 * MM, wl["DWL"])
+        self.assertAlmostEqual(800 * MM, wl["WL 1"])
+        self.assertAlmostEqual(2550 * MM, wl["WL 8"])
+        heights = list(wl.values())
+        for lower, upper in zip(heights, heights[1:]):
+            self.assertAlmostEqual(250 * MM, upper - lower)
+
+    def test_body_lines_with_waterlines(self):
+        without = self.project.body_lines("raw")["6"][0]
+        with_wl = self.project.body_lines("raw", waterlines=True)["6"][0]
+        self.assertEqual(len(without) + 8, len(with_wl))
+        # WL 5 at station 6: breadth 1480 mm at the draught
+        self.assertIn(
+            (round(1480 * MM, 6), round(1800 * MM, 6)),
+            [(round(x, 6), round(y, 6)) for x, y in with_wl],
+        )
+
     def test_body_lines(self):
         lines = self.project.body_lines("raw")
         self.assertEqual(13, len(lines))

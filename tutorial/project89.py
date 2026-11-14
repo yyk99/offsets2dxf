@@ -16,7 +16,8 @@ Body plan placement (``body_placement``): ``"max_breadth"`` (default) puts the
 body lines in the middle of the profile view, ``"right"`` puts them to the
 right of it.
 
-Run: ``python3 project89.py`` -> writes test_project89.dxf (everything),
+Run: ``python3 project89.py [--out-dir DIR]`` writes, into ./out (in the
+current directory) or DIR, test_project89.dxf (everything),
 test_project89_body_right.dxf (body plan to the right),
 test_project89_body_split.dxf (aft/forward halves) and
 test_project89_body.dxf (body lines only).
@@ -182,16 +183,23 @@ class Project89(table_of_offsets.Model):
                 dxf.add_red_polyline(poly)
 
 if __name__ == "__main__":
+    out_dir = table_of_offsets.output_dir_from_args(description=__doc__)
+
+    def out(name):
+        return os.path.join(out_dir, name)
+
     proj = Project89()
-    proj.save_model_as("test_project89.dxf")
-    print("Saved as:", os.path.abspath("test_project89.dxf"))
+    proj.save_model_as(out("test_project89.dxf"))
+    print("Saved as:", out("test_project89.dxf"))
     # option 2: the body plan to the right of the profile view, clear of it
-    proj.save_model_as("test_project89_body_right.dxf", body_placement="right")
+    proj.save_model_as(out("test_project89_body_right.dxf"), body_placement="right")
     # the usual body plan: aft stations left, forward stations right
     proj.save_model_as(
-        "test_project89_body_split.dxf", body_placement="right", body_sides="split"
+        out("test_project89_body_split.dxf"),
+        body_placement="right",
+        body_sides="split",
     )
-    proj.save_body_lines_as("test_project89_body.dxf")
-    print("Saved as:", os.path.abspath("test_project89_body.dxf"))
+    proj.save_body_lines_as(out("test_project89_body.dxf"))
+    print("Saved as:", out("test_project89_body.dxf"))
 
 # end of file

@@ -153,6 +153,30 @@ class Test_Units(unittest.TestCase):
             table_of_offsets.Model(csv, unit="furlong")
 
 
+class Test_Output(unittest.TestCase):
+    def test_output_dir_from_args(self):
+        f = table_of_offsets.output_dir_from_args
+        # ./out in the current directory by default, whatever it is
+        self.assertEqual(os.path.join(os.getcwd(), "out"), f([]))
+        self.assertEqual("out", table_of_offsets.DEFAULT_OUT_DIR)
+        cwd = os.getcwd()
+        try:
+            os.chdir(os.path.join(source_directory, "tests"))
+            self.assertEqual(os.path.join(source_directory, "tests", "out"), f([]))
+        finally:
+            os.chdir(cwd)
+        self.assertEqual(os.path.abspath("elsewhere"), f(["--out-dir", "elsewhere"]))
+
+    def test_dxf_creates_the_directory(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "new", "sub", "file.dxf")
+            with table_of_offsets.DXF(out) as dxf:
+                dxf.add_polyline([(0, 0), (1, 1)])
+            self.assertTrue(os.path.exists(out))
+
+
 class Test_BodyLine(unittest.TestCase):
     """breadth_at / height_at / loft_body_line on sample_data/offset_table.csv"""
 

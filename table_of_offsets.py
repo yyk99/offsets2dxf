@@ -21,6 +21,9 @@ Classes:
 - ``DXF`` - thin context-manager wrapper around ``ezdxf`` that saves the file.
 """
 
+import argparse
+import os
+
 import ezdxf
 import ezdxf.entities
 import ezdxf.enums
@@ -29,6 +32,27 @@ import pandas
 import math
 
 __version__ = "0.5.0"
+
+# the .dxf files written by the scripts go here by default: ./out in the
+# current directory (git-ignored)
+DEFAULT_OUT_DIR = "out"
+
+
+def output_dir_from_args(argv: list = None, description: str = None) -> str:
+    """Parse the command line of a script: ``[--out-dir DIR]``.
+
+    Returns the absolute path of the directory for the output files:
+    ``out`` in the current directory if not given (``DEFAULT_OUT_DIR``), a
+    relative ``DIR`` is also relative to the current directory. The directory
+    is created when a file is saved (see ``DXF.close``).
+    """
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument(
+        "--out-dir",
+        default=DEFAULT_OUT_DIR,
+        help="directory for the .dxf files (default: %(default)s)",
+    )
+    return os.path.abspath(parser.parse_args(argv).out_dir)
 
 
 class TableOfOffsets:
@@ -680,8 +704,12 @@ class DXF:
         self._msp.add_polyline2d(poly, dxfattribs={"layer": "grid"})
 
     def close(self):
-        """Save the file. Called automatically on leaving the ``with`` block."""
+        """Save the file (the directory is created if needed). Called
+        automatically on leaving the ``with`` block."""
         if self._doc is not None:
+            out_dir = os.path.dirname(self._output_dxf)
+            if out_dir:
+                os.makedirs(out_dir, exist_ok=True)
             self._doc.saveas(self._output_dxf)
             self._doc = None
             self._msp = None

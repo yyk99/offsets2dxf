@@ -6,10 +6,11 @@ e.g. "LWL to SHEER", "BASE TO B-2") and half-breadths (lower rows, e.g.
 "LWL to ..." heights are measured from the LWL, which is ``_y_lwl`` above the
 base. Station 8 and TRAN. are placed specially in ``station_positions``.
 
-Run: ``python3 projectbluemoon.py`` (from tutorial/) writes
-test_project_blue_moon.dxf (everything, body lines in the middle of the profile
-view), test_project_blue_moon_body_right.dxf (body plan to the right of the
-profile view), test_project_blue_moon_body_split.dxf (aft/forward halves) and test_project_blue_moon_body.dxf (body lines only).
+Run: ``python3 projectbluemoon.py [--out-dir DIR]`` writes, into ./out (in the
+current directory) or DIR, test_project_blue_moon.dxf (everything, body lines in
+the middle of the profile view), test_project_blue_moon_body_right.dxf (body
+plan to the right of the profile view), test_project_blue_moon_body_split.dxf
+(aft/forward halves) and test_project_blue_moon_body.dxf (body lines only).
 """
 
 import context
@@ -238,18 +239,25 @@ RED-CORRECTED,,,,,,,,,
 
 
 if __name__ == "__main__":
+    out_dir = table_of_offsets.output_dir_from_args(description=__doc__)
+
+    def out(name):
+        return os.path.join(out_dir, name)
+
     proj = ProjectBlueMoon()
-    proj.save_model_as("test_project_blue_moon.dxf")
-    print("Saved as:", os.path.abspath("test_project_blue_moon.dxf"))
+    proj.save_model_as(out("test_project_blue_moon.dxf"))
+    print("Saved as:", out("test_project_blue_moon.dxf"))
     # option 2: the body plan to the right of the profile view, clear of it
-    proj.save_model_as("test_project_blue_moon_body_right.dxf", body_placement="right")
+    proj.save_model_as(
+        out("test_project_blue_moon_body_right.dxf"), body_placement="right"
+    )
     # the usual body plan: aft stations left, forward stations right
     proj.save_model_as(
-        "test_project_blue_moon_body_split.dxf",
+        out("test_project_blue_moon_body_split.dxf"),
         body_placement="right",
         body_sides="split",
     )
-    proj.save_body_lines_as("test_project_blue_moon_body.dxf")
-    print("Saved as:", os.path.abspath("test_project_blue_moon_body.dxf"))
+    proj.save_body_lines_as(out("test_project_blue_moon_body.dxf"))
+    print("Saved as:", out("test_project_blue_moon_body.dxf"))
 
 # end of file
