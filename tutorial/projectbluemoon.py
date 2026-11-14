@@ -1,6 +1,16 @@
-#
-#
-#
+"""Blue Moon: model for sample_data_too/offset_table_blue_moon.csv.
+
+The table has 9 stations (1-8 and TRAN.) in two halves: heights (upper rows,
+e.g. "LWL to SHEER", "BASE TO B-2") and half-breadths (lower rows, e.g.
+"SHEER", "LWL"). Heights named "BASE ..." are measured from the base line;
+"LWL to ..." heights are measured from the LWL, which is ``_y_lwl`` above the
+base. Station 8 and TRAN. are placed specially in ``station_positions``.
+
+Run: ``python3 projectbluemoon.py`` (from tutorial/) writes
+test_project_blue_moon.dxf (everything, body lines in the middle of the profile
+view), test_project_blue_moon_body_right.dxf (body plan to the right of the
+profile view), test_project_blue_moon_body_split.dxf (aft/forward halves) and test_project_blue_moon_body.dxf (body lines only).
+"""
 
 import context
 from context import table_of_offsets
@@ -9,7 +19,7 @@ import os
 
 
 #
-# Model implementation spicific for the sample data
+# Model implementation specific for the sample data
 #
 class ProjectBlueMoon(table_of_offsets.Model):
     def __init__(self):
@@ -19,6 +29,7 @@ class ProjectBlueMoon(table_of_offsets.Model):
                 "../sample_data_too/offset_table_blue_moon.csv",
             )
         )
+        self.set_bow_station("1")  # the stem; the stern (TRAN.) is at x = 0
         # fmt: off
         self.set_under_waterline(
             {
@@ -94,9 +105,83 @@ class ProjectBlueMoon(table_of_offsets.Model):
         """(virtual): central lines will be drawn here"""
         return [self._y0, self._y1]
 
-    def save_model_as(self, filename_dxf: str):
+    # 0         LWL to SHEER
+    # 1      LWL to DECK EDG
+    # 2          BASE TO B-3
+    # 3          BASE TO B-2
+    # 4          BASE TO B-1
+    # 5       RABBET TO BASE
+    # 6         KEEL TO BASE
+    # 7     CENTERLINE SHAFT
+    # 8     BASE TO TOP BAL.
+
+    # 9                SHEER
+    # 10               WL 2A
+    # 11               WL 1A
+    # 12                 LWL
+    # 13               WL 1B
+    # 14               WL 2B
+    # 15              RABBET
+    # 16                KEEL
+    # 17         BALLAST TOP
+    # 18            D. UPPER
+    # 19            D. LOWER
+
+    # {'LWL to SHEER': 0, 'LWL to DECK EDG': 1, 'BASE TO B-3': 2, 'BASE TO B-2': 3, 'BASE TO B-1': 4, 'RABBET TO BASE': 5, 'KEEL TO BASE': 6, 'CENTERLINE SHAFT': 7, 'BASE TO TOP BAL.': 8, 'SHEER': 9, 'WL 2A': 10, 'WL 1A': 11, 'LWL': 12, 'WL 1B': 13, 'WL 2B': 14, 'RABBET': 15, 'KEEL': 16, 'BALLAST TOP': 17, 'D. UPPER': 18, 'D. LOWER': 19, nan: 20, 'RED-CORRECTED': 21}
+
+    def body_lines(
+        self,
+        placement: str = "max_breadth",
+        sides: str = "half",
+        bow_station: str = None,
+    ):
+        """Return {station: polyline} with the body plan line of every station"""
+        # (breadth, height) pairs. A string is a table row, a number is inches.
+        wl = self.waterlines_positions()
+        body_points = [
+            ("SHEER", "LWL to SHEER"),
+            ("RABBET", "RABBET TO BASE"),
+            ("KEEL", "KEEL TO BASE"),
+            ("BALLAST TOP", "BASE TO TOP BAL."),
+            # waterlines: breadth from the table, height is the waterline
+            ("WL 2A", wl["WL 2A"]),
+            ("WL 1A", wl["WL 1A"]),
+            ("LWL", wl["LWL"]),
+            ("WL 1B", wl["WL 1B"]),
+            ("WL 2B", wl["WL 2B"]),
+            # buttocks: height from the table, breadth is the buttock
+            (36.0, "BASE TO B-3"),
+            (24.0, "BASE TO B-2"),
+            (12.0, "BASE TO B-1"),
+        ]
+        return self.loft_body_lines(
+            body_points, placement, sides=sides, bow_station=bow_station
+        )
+
+    def save_body_lines_as(
+        self, filename_dxf: str, placement: str = "max_breadth", sides: str = "half"
+    ):
+        """Save the body lines only (no grid, no plan/profile lines)"""
         with table_of_offsets.DXF(filename_dxf) as dxf:
-            self.plot_grid(dxf)
+            for poly in self.body_polylines(self.body_lines(placement, sides)):
+                dxf.add_red_polyline(poly)
+
+    def save_model_as(
+        self,
+        filename_dxf: str,
+        body_placement: str = "max_breadth",
+        body_sides: str = "half",
+    ):
+        body_lines = self.body_lines(body_placement, body_sides)
+        polylines = self.body_polylines(body_lines)
+        grid_options = {}
+        if body_placement == "right":
+            # run the base line and the waterlines through the body plan,
+            # draw the body plan centerline
+            grid_options = self.body_plan_grid_options(body_lines, body_sides)
+
+        with table_of_offsets.DXF(filename_dxf) as dxf:
+            self.plot_grid(dxf, **grid_options)
 
             dxf.add_red_polyline(self.loft_line_n(0))
             dxf.add_red_polyline(self.loft_line_n(1))
@@ -108,7 +193,7 @@ class ProjectBlueMoon(table_of_offsets.Model):
             dxf.add_red_polyline(self.loft_line_n(7))
             dxf.add_red_polyline(self.loft_line_n(8))
             #
-            # now half-bradth
+            # now half-breadth
             #
             dxf.add_red_polyline(self.loft_line_n(9))
             dxf.add_red_polyline(self.loft_line_n(10))
@@ -117,10 +202,54 @@ class ProjectBlueMoon(table_of_offsets.Model):
             dxf.add_red_polyline(self.loft_line_n(13))
             dxf.add_red_polyline(self.loft_line_n(14))
 
+            # draw a body line
+
+            # the pairs of point making a body line
+            """
+            #,1,2,3,4,5,6,7,8,TRAN.
+------------------ Y -----------------------------
+LWL to SHEER,3-6-5,3-0-0,2-6-4,2-2-5,2-0-3,1-11-7,2-1-7,2-3-1,2-7-4
+LWL to DECK EDG,2-6-5,2-0-1,1-6-5,1-2-6,1-0-4,1-0-0,1-2-0,1-5-2,1-8-2
+BASE TO B-3,,,4-10-1,3-5-7,3-3-6,3-8-1,4-7-0,5-4-6,
+BASE TO B-2,,5-5-7,3-6-0,2-11-0,2-10-5,3-2-7,4-1-2,4-9-2,5-0-2
+BASE TO B-1,,3-9-3,2-8-3,2-3-7,2-4-4,2-9-0,3-8-6,4-5-5,4-7-2
+RABBET TO BASE,4-7-4,2-11-0,2-0-5,1-7-3,1-3-1,1-1-7,3-2-1,4-3-0,4-3-4
+KEEL TO BASE,4-1-7,2-4-6,1-4-2,0-9-3,0-5-2,0-2-1,1-7-3,4-1-7,
+CENTERLINE SHAFT,,,,,,3-0-4,2-9-6,,
+BASE TO TOP BAL.,,,1-8-3,1-5-4,1-2-6,0-8-3,,,
+--------------------- X --------------------------
+SHEER,0-10-0,2-8-0,3-9-0,4-2-4,4-4-0,4-1-4,3-6-2,3-1-1,2-6-2
+WL 2A,0-5-0,2-0-7,3-4-7,4-1-7,4-4-2,4-1-7,3-6-6,3-1-6,2-10-1
+WL 1A,0-2-7,1-8-3,3-0-6,3-11-6,4-4-0,4-0-7,3-4-2,2-3-1,1-9-0
+LWL,,1-3-0,2-7-0,3-6-5,4-0-6,3-8-6,2-1-3,0-1-0,0-1-0
+WL 1B,,0-7-7,1-10-6,2-10-3,3-1-6,2-4-1,0-4-7,,
+WL 2B,,,0-11-4,1-6-4,1-6-4,0-10-1,0-2-4,,
+RABBET,0-2-0,0-2-2,0-2-6,0-3-0,0-3-0,0-3-0,0-3-0,0-3-0,0-3-0
+KEEL,0-0-4,0-0-4,0-1-4,0-3-0,0-3-0,0-3-0,0-1-0,0-1-0,0-1-0
+BALLAST TOP,,,0-2-0,0-3-0,0-3-0,0-3-0,,,
+D. UPPER,0-7-0,2-1-7,3-3-7,4-1-5,4-4-7,4-1-2,3-2-4,2-5-6,
+D. LOWER,,1-0-0,1-9-3,2-1-5,2-1-6,2-2-4,0-10-7,,
+,,,,,,,,,
+RED-CORRECTED,,,,,,,,,
+            """
+
+            for poly in polylines:
+                dxf.add_red_polyline(poly)
+
 
 if __name__ == "__main__":
     proj = ProjectBlueMoon()
     proj.save_model_as("test_project_blue_moon.dxf")
     print("Saved as:", os.path.abspath("test_project_blue_moon.dxf"))
+    # option 2: the body plan to the right of the profile view, clear of it
+    proj.save_model_as("test_project_blue_moon_body_right.dxf", body_placement="right")
+    # the usual body plan: aft stations left, forward stations right
+    proj.save_model_as(
+        "test_project_blue_moon_body_split.dxf",
+        body_placement="right",
+        body_sides="split",
+    )
+    proj.save_body_lines_as("test_project_blue_moon_body.dxf")
+    print("Saved as:", os.path.abspath("test_project_blue_moon_body.dxf"))
 
 # end of file

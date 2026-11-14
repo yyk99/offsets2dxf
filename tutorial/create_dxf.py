@@ -1,3 +1,5 @@
+"""Minimal ezdxf example: create a DXF with one line (not used by the project)."""
+
 import ezdxf
 
 # create a new DXF R2010 document
