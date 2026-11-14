@@ -68,7 +68,7 @@ class TableOfOffsets:
         elif len(w) == 1:
             d = int(w[0]) * 12.0
         else:
-            raise Exception("bad offset format")
+            raise ValueError("bad offset format: %r" % (triplet,))
         return d + delta
 
 
@@ -288,6 +288,20 @@ class Model:
             poly.append((x, y))
 
         return poly
+
+    def loft_body_lines(self, body_points: list):
+        """Return ``{station: polyline}``: the body line of every station.
+
+        ``body_points`` is as for ``loft_body_line``. Points whose table cell is
+        empty (or not a plain offset) at a station are skipped. Every polyline
+        is sorted from the top (sheer) down.
+        """
+        lines = {}
+        for station in self.station_positions():
+            poly = self.loft_body_line(station, body_points, skip_missing=True)
+            poly.sort(key=lambda pt: -pt[1])
+            lines[station] = poly
+        return lines
 
     def line_to_index(self, line_id: str) -> int:
         """Return the row index of the line named line_id (the "#" column)"""

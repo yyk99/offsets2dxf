@@ -1,7 +1,12 @@
 """Project 89: model of the sample table (sample_data/offset_table.csv).
 
-Plan/profile layout is two grid lines; body line lofting is unfinished here.
-Run: ``python3 project89.py`` -> writes test_project89.dxf
+Heights (Sheer, B 3', B 2', B 1', Rabbet, Profile) are measured from the LWL,
+positive up. Half-breadths are the "1/2w Deck", "WL ..." and "... Plan" rows.
+Some cells hold two values ("0-2-0 and 0-3-0"); such points are skipped in the
+body lines.
+
+Run: ``python3 project89.py`` -> writes test_project89.dxf (everything) and
+test_project89_body.dxf (body lines only).
 """
 
 import context
@@ -85,6 +90,40 @@ class Project89(table_of_offsets.Model):
         """(virtual) we want two horizontal grid lines"""
         return [0, 10 * 12.0]
 
+    def body_lines(self):
+        """Return {station: polyline} with the body plan line of every station.
+
+        Points are (half-breadth, height above the LWL) in inches.
+        """
+        wl = {
+            "WL + 2'": 2 * 12.0,
+            "WL + 1'": 12.0,
+            'WL + 6"': 6.0,
+            "LWL": 0.0,
+            'WL - 6"': -6.0,
+            "WL - 1'": -12.0,
+            "WL - 2'": -24.0,
+            "WL - 3'": -36.0,
+            "WL - 4'": -4 * 12.0,
+        }
+        # (breadth, height): a string is a table row, a number is inches
+        body_points = [
+            ("1/2w Deck", "Sheer"),
+            ("Rabbet Plan", "Rabbet"),
+            ("Profile Plan", "Profile"),
+        ]
+        # waterlines: breadth from the table, height is the waterline
+        body_points += [(name, height) for name, height in wl.items()]
+        # buttocks: height from the table, breadth is the buttock
+        body_points += [(36.0, "B 3'"), (24.0, "B 2'"), (12.0, "B 1'")]
+        return self.loft_body_lines(body_points)
+
+    def save_body_lines_as(self, filename_dxf: str):
+        """Save the body lines only (no grid, no plan/profile lines)"""
+        with table_of_offsets.DXF(filename_dxf) as dxf:
+            for poly in self.body_lines().values():
+                dxf.add_red_polyline(poly)
+
     def save_model_as(self, filename_dxf: str):
         with table_of_offsets.DXF(filename_dxf) as dxf:
             self.plot_grid(dxf)
@@ -103,13 +142,14 @@ class Project89(table_of_offsets.Model):
             dxf.add_red_polyline(self.loft_line_n(11))
             dxf.add_red_polyline(self.loft_line_n(12))
 
-            # TODO: body plan lines are not implemented for this project yet.
-            # loft_body_line(station, [(breadth, height), ...]) takes pairs;
-            # see projectbluemoon.py body_lines() for an example.
+            for poly in self.body_lines().values():
+                dxf.add_red_polyline(poly)
 
 if __name__ == "__main__":
     proj = Project89()
     proj.save_model_as("test_project89.dxf")
     print("Saved as:", os.path.abspath("test_project89.dxf"))
+    proj.save_body_lines_as("test_project89_body.dxf")
+    print("Saved as:", os.path.abspath("test_project89_body.dxf"))
 
 # end of file

@@ -147,13 +147,7 @@ class ProjectBlueMoon(table_of_offsets.Model):
             (24.0, "BASE TO B-2"),
             (12.0, "BASE TO B-1"),
         ]
-        lines = {}
-        for station in self.station_positions():
-            poly = self.loft_body_line(station, body_points, skip_missing=True)
-            # a section runs from the sheer down to the keel
-            poly.sort(key=lambda pt: -pt[1])
-            lines[station] = poly
-        return lines
+        return self.loft_body_lines(body_points)
 
     def save_body_lines_as(self, filename_dxf: str):
         """Save the body lines only (no grid, no plan/profile lines)"""
