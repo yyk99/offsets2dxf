@@ -25,7 +25,9 @@ the current directory) or DIR,
 test_project_ferrocement.dxf (everything), test_project_ferrocement_body_right.dxf
 (body plan to the right of the profile view),
 test_project_ferrocement_body_split.dxf (aft/forward halves) and
-test_project_ferrocement_body.dxf (body lines only).
+test_project_ferrocement_body.dxf (body lines only) and
+test_project_ferrocement_station6.dxf (the body line of the station 6 with
+the table rows the coordinates of every point come from).
 """
 
 import context
@@ -96,6 +98,24 @@ class ProjectFerrocement(table_of_offsets.Model):
     def drawing_area_vertical_borders(self):
         return (self._y_plan - 20, 130.0)
 
+    def body_points(self):
+        """The (breadth, height) points of a body line, without the waterlines
+        (``loft_body_lines`` adds them): a string is a table row, a number is
+        inches."""
+        # (breadth, height): a string is a table row, a number is inches
+        body_points = [
+            ("Breadth Sheer", "Height Sheer"),
+            ("Breadth Deck", "Height Deck"),
+            ("Breadth Knuckle", "Height Knuckle"),
+            ("Breadth Keel", "Height Keel"),
+        ]
+        # the waterlines are added by loft_body_lines (waterlines_positions)
+        body_points += [
+            (offset, "Height Buttock " + name[2:])
+            for name, offset in self.buttocks_positions().items()
+        ]
+        return body_points
+
     def body_lines(
         self,
         placement: str = "max_breadth",
@@ -110,18 +130,7 @@ class ProjectFerrocement(table_of_offsets.Model):
         do not agree with the buttocks, so the sections zigzag, see the TODO in
         CLAUDE.md.
         """
-        # (breadth, height): a string is a table row, a number is inches
-        body_points = [
-            ("Breadth Sheer", "Height Sheer"),
-            ("Breadth Deck", "Height Deck"),
-            ("Breadth Knuckle", "Height Knuckle"),
-            ("Breadth Keel", "Height Keel"),
-        ]
-        # the waterlines are added by loft_body_lines (waterlines_positions)
-        body_points += [
-            (offset, "Height Buttock " + name[2:])
-            for name, offset in self.buttocks_positions().items()
-        ]
+        body_points = self.body_points()
         return self.loft_body_lines(
             body_points, placement, sides=sides, bow_station=bow_station
         )
@@ -132,6 +141,12 @@ class ProjectFerrocement(table_of_offsets.Model):
         """Save the body lines only (no grid, no plan/profile lines)"""
         with self.open_dxf(filename_dxf) as dxf:
             self.plot_body_lines(dxf, self.body_lines(placement, sides))
+
+    def save_station_as(self, filename_dxf: str, station: str = "6"):
+        """Save the body line of one station for checking the data: every point
+        is labelled with the table rows its coordinates come from."""
+        with self.open_dxf(filename_dxf) as dxf:
+            self.plot_annotated_body_line(dxf, station, self.body_points())
 
     def save_model_as(
         self,
@@ -204,6 +219,8 @@ if __name__ == "__main__":
         body_sides="split",
     )
     proj.save_body_lines_as(out("test_project_ferrocement_body.dxf"))
+    # one station, every point labelled with the source of its coordinates
+    proj.save_station_as(out("test_project_ferrocement_station6.dxf"), "6")
     print("Saved as:", out("test_project_ferrocement_body.dxf"))
 
 # end of file

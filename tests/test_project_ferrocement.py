@@ -91,6 +91,64 @@ class Test_ProjectFerrocement(unittest.TestCase):
         for buttock in (500, 1000, 1500):
             self.assertIn(buttock, xs)
 
+    def test_annotated_station(self):
+        """one station, every point labelled with the sources of its coordinates"""
+        points = self.project.loft_body_line_sources("6", self.project.body_points())
+        self.assertEqual(15, len(points))
+        # from the top down
+        heights = [y for _, y, _, _ in points]
+        self.assertEqual(sorted(heights, reverse=True), heights)
+        sources = [(b, h if isinstance(h, str) else "WL") for _, _, b, h in points]
+        self.assertIn(("Breadth Deck", "Height Deck"), sources)
+        self.assertIn(("Breadth WL 3", "WL"), sources)
+        self.assertIn((500 * MM, "Height Buttock I"), [(b, h) for _, _, b, h in points])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "station6.dxf")
+            self.project.save_station_as(out, "6")
+            doc = ezdxf.readfile(out)
+            texts = [e.dxf.text for e in doc.modelspace() if e.dxftype() == "TEXT"]
+            self.assertIn("station 6", texts)
+            self.assertIn("5 (Breadth Deck, Height Deck)", texts)
+            self.assertIn("14 (500 mm, Height Buttock I)", texts)
+            self.assertIn("9 (Breadth WL 3, 1300 mm)", texts)
+            # the base line and the waterlines are named
+            self.assertIn("baseline (0 mm)", texts)
+            self.assertIn("DWL (1800 mm)", texts)
+            self.assertIn("WL 1 (800 mm)", texts)
+            # the buttocks are named: 500 mm apart
+            self.assertIn("B I (500 mm)", texts)
+            self.assertIn("B II (1000 mm)", texts)
+            self.assertIn("B III (1500 mm)", texts)
+            # the title, 15 points, the base line, 8 waterlines and 3 buttocks
+            self.assertEqual(1 + 15 + 1 + 8 + 3, len(texts))
+            # horizontal lines: the base line and the 8 waterlines
+            ys = sorted(
+                round(pts[0][1], 6)
+                for pts in (
+                    [tuple(p)[:2] for p in e.points()]
+                    for e in doc.modelspace()
+                    if e.dxf.layer == "grid" and e.dxftype() == "POLYLINE"
+                )
+                if pts[0][1] == pts[1][1]
+            )
+            # (the file is in millimetres, the model in inches)
+            expected = [0.0] + [
+                round(h / MM, 6) for h in self.project.waterlines_positions().values()
+            ]
+            self.assertEqual(sorted(expected), ys)
+            # vertical lines: the centerline and the buttocks
+            xs = sorted(
+                round(pts[0][0], 6)
+                for pts in (
+                    [tuple(p)[:2] for p in e.points()]
+                    for e in doc.modelspace()
+                    if e.dxf.layer == "grid" and e.dxftype() == "POLYLINE"
+                )
+                if pts[0][0] == pts[1][0]
+            )
+            self.assertEqual([0.0, 500.0, 1000.0, 1500.0], xs)
+
     def test_output_in_mm(self):
         """the default output unit is the unit of the table: millimetres"""
         import ezdxf.units

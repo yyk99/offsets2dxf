@@ -441,8 +441,20 @@ class Model:
             instead of raising ValueError
         Points are (half-breadth, height).
         """
+        return [
+            (x, y)
+            for x, y, _, _ in self._body_point_sources(
+                station_id, body_points, skip_missing
+            )
+        ]
 
-        poly = []
+    def _body_point_sources(
+        self, station_id: str, body_points: list, skip_missing: bool
+    ) -> list:
+        """The points of ``loft_body_line`` with their sources:
+        ``[(x, y, breadth_source, height_source)]``, a source is the name of the
+        table row or the number (inches) the coordinate comes from."""
+        points = []
 
         for pp in body_points:
             if type(pp) is tuple:
@@ -462,9 +474,92 @@ class Model:
                 if not skip_missing:
                     raise
                 continue
-            poly.append((x, y))
+            points.append((x, y, breadth_line, height_line))
 
-        return poly
+        return points
+
+    def loft_body_line_sources(self, station_id: str, body_points: list) -> list:
+        """The body line of one station (no shift, half-breadth only) with the
+        source of every coordinate: ``[(x, y, breadth_source, height_source)]``,
+        from the top down. The points are those of ``loft_body_lines``: the
+        ``body_points`` and the waterlines that are in the table. A source is
+        the name of the table row or the number (inches) of the point.
+        """
+        points = self._body_point_sources(
+            station_id, list(body_points) + self.waterline_body_points(), True
+        )
+        points.sort(key=lambda pt: -pt[1])
+        return points
+
+    def format_length(self, inches: float) -> str:
+        """A length for a label, in the unit of the table (inches for the
+        feet-inches-eighths tables), e.g. ``"500 mm"``."""
+        factor = TableOfOffsets.UNITS[self._unit]
+        if factor is None:
+            return "%g in" % round(inches, 3)
+        return "%g %s" % (round(inches / factor, 3), self._unit)
+
+    def plot_annotated_body_line(
+        self,
+        dxf: object,
+        station_id: str,
+        body_points: list,
+        text_height: float = 2.0,
+    ):
+        """Draw the body line of one station for checking the data: the
+        polyline, its centerline, and next to every point a label
+        ``n (breadth source, height source)``, e.g. ``3 (Breadth Deck, Height
+        Deck)`` or ``7 (500 mm, Height Buttock I)``. n is the number of the
+        point from the top. The coordinates are not shifted.
+
+        The base line (y = 0) and the waterlines (``waterlines_positions``) are
+        drawn as horizontal lines with their names on the left, the buttocks
+        (``buttocks_positions``) as vertical lines with their names on the top.
+        """
+        points = self.loft_body_line_sources(station_id, body_points)
+        if not points:
+            return
+
+        def source(src):
+            return src if isinstance(src, str) else self.format_length(src)
+
+        xs = [x for x, _, _, _ in points]
+        ys = [y for _, y, _, _ in points]
+        waterlines = self.waterlines_positions()
+        buttocks = self.buttocks_positions()
+        y_min = min([0.0] + ys + list(waterlines.values()))
+        y_max = max([0.0] + ys + list(waterlines.values()))
+        left, right = -30.0, max(xs + list(buttocks.values())) + 10.0
+
+        dxf.add_grid_polyline([(0, y_min - 10), (0, y_max + 10)])
+        dxf.text((1, y_max + 10), "station " + station_id, height=text_height)
+
+        # the base line and the waterlines, named on the left
+        for name, y in [("baseline", 0.0)] + list(waterlines.items()):
+            dxf.add_grid_polyline([(left, y), (right, y)])
+            dxf.text(
+                (left - 1, y + 0.5),
+                "%s (%s)" % (name, self.format_length(y)),
+                align="right",
+                height=text_height,
+            )
+
+        # the buttocks, named on the top
+        for name, x in buttocks.items():
+            dxf.add_grid_polyline([(x, y_min - 10), (x, y_max + 10)])
+            dxf.text(
+                (x, y_max + 11),
+                "%s (%s)" % (name, self.format_length(x)),
+                align="center",
+                height=text_height,
+            )
+        dxf.add_red_polyline([(x, y) for x, y, _, _ in points])
+        for n, (x, y, breadth_src, height_src) in enumerate(points, 1):
+            dxf.text(
+                (x + 1, y + 0.5),
+                "%d (%s, %s)" % (n, source(breadth_src), source(height_src)),
+                height=text_height,
+            )
 
     BODY_PLACEMENTS = ("raw", "max_breadth", "right")
     BODY_SIDES = ("half", "both", "split")
@@ -821,11 +916,14 @@ class DXF:
             self._doc = None
             self._msp = None
 
-    def text(self, xy: tuple, txt: str, align: str = "left"):
+    def text(self, xy: tuple, txt: str, align: str = "left", height: float = 1.0):
         """Add text to the ``text`` layer
 
-        align - ``"left"`` (``xy`` is the bottom left corner of the text) or
-        ``"center"`` (``xy`` is the middle of the bottom of the text).
+        height - the height of the text in inches.
+
+        align - ``"left"`` (``xy`` is the bottom left corner of the text),
+        ``"center"`` (the middle of the bottom of the text) or ``"right"`` (the
+        bottom right corner).
 
         # Using a predefined text style:
         msp.add_text(
@@ -837,10 +935,10 @@ class DXF:
         alignment = {
             "left": ezdxf.enums.TextEntityAlignment.LEFT,
             "center": ezdxf.enums.TextEntityAlignment.BOTTOM_CENTER,
+            "right": ezdxf.enums.TextEntityAlignment.BOTTOM_RIGHT,
         }[align]
-        # the text is 1 inch high
         self._msp.add_text(
-            txt, height=1.0 * self._scale, dxfattribs={"layer": "text"}
+            txt, height=height * self._scale, dxfattribs={"layer": "text"}
         ).set_placement(
             (xy[0] * self._scale, xy[1] * self._scale), align=alignment
         )
