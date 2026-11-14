@@ -80,7 +80,10 @@ A CSV file. The first column (header `#`) holds line names (`Sheer`, `B 3'`,
   `"raw"` - no shift.
 - `sides="half"` (default) - the half-breadth only; `"both"` - both halves of
   every station; `"split"` - the usual body plan, aft stations to the left and
-  forward stations to the right of the centerline.
+  forward stations to the right of the centerline. The bow end is given by
+  `Model.set_bow_station("<station>")` (or the `bow_station` argument); if it
+  is not set, the bow is the end with the greater x. Both tutorial projects set
+  it in `__init__`.
 
 With `placement="right"` the base line and the waterlines of the profile view
 are extended through the body plan and its vertical centerline is drawn

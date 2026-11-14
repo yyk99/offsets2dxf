@@ -79,6 +79,32 @@ class Test_Project89BodyLines(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.project.body_lines("raw", "nowhere")
 
+    def test_bow_station(self):
+        positions = self.project.station_positions()
+        self.assertEqual("0", self.project.bow_station())
+        default = self.project.body_lines("raw", "split")
+
+        # the bow at the other end: forward and aft swap
+        self.project.set_bow_station("33")
+        swapped = self.project.body_lines("raw", "split")
+        for station in ("30", "6"):
+            # a station aft of the midship is on the left, forward on the right
+            self.assertEqual(1, len(default[station]))
+            self.assertEqual(1, len(swapped[station]))
+            self.assertNotEqual(
+                default[station][0][0][0] > 0, swapped[station][0][0][0] > 0, station
+            )
+        # the argument overrides the setting
+        back = self.project.body_lines("raw", "split", bow_station="0")
+        self.assertEqual(default, back)
+
+        with self.assertRaises(KeyError):
+            self.project.set_bow_station("99")
+        raw = self.project.body_lines("raw")
+        widest = max(raw, key=lambda s: max(x for x, _ in raw[s][0]))
+        with self.assertRaises(ValueError):
+            self.project.body_lines("raw", "split", bow_station=widest)
+
     def test_right_placement_keeps_left_half_clear(self):
         lines = self.project.body_lines("right", "split")
         xs = [x for p in self.project.body_polylines(lines) for x, _ in p]

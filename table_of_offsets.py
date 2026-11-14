@@ -103,7 +103,23 @@ class Model:
         self._under_waterline = {}
         # x of the centerline of the body plan lofted last (loft_body_lines)
         self.body_plan_centerline_x = None
+        self._bow_station = None
         pass
+
+    def set_bow_station(self, station: str):
+        """Tell which station is at the bow end, e.g. ``"1"`` or ``"0"``.
+
+        It decides which stations are "forward" for ``sides="split"`` in
+        ``loft_body_lines``. If it is not set, the bow is assumed to be at the
+        greater x of ``station_positions``.
+        """
+        if station is not None and station not in self.station_positions():
+            raise KeyError("unknown station: %r" % (station,))
+        self._bow_station = station
+
+    def bow_station(self):
+        """The station set by ``set_bow_station`` (None if not set)."""
+        return self._bow_station
 
     def set_under_waterline(self, d: dict):
         """Set the offsets to be negated, as ``{line_name: [station, ...]}``.
@@ -324,6 +340,7 @@ class Model:
         placement: str = "max_breadth",
         gap: float = 24.0,
         sides: str = "half",
+        bow_station: str = None,
     ):
         """Return ``{station: [polyline, ...]}``: the body lines of every station.
 
@@ -340,8 +357,11 @@ class Model:
         - ``"split"``: the usual body plan. Stations aft of the midship (the
           station with the greatest breadth) are drawn to the left of the
           centerline, stations forward of it to the right. The midship station
-          is drawn on both sides. Aft means a smaller x in
-          ``station_positions`` (the bow is to the right, as in the plan view).
+          is drawn on both sides. Which end is the bow is given by
+          ``bow_station`` (or ``set_bow_station``); if neither is set, the bow
+          is the end with the greater x in ``station_positions``.
+
+        ``bow_station`` - overrides ``set_bow_station`` for this call.
 
         ``placement`` - where the centerline of the body plan is put along x
         (heights are the same as in the profile view, so y is not changed):
@@ -363,6 +383,10 @@ class Model:
             )
 
         positions = self.station_positions()
+        if bow_station is None:
+            bow_station = self._bow_station
+        if bow_station is not None and bow_station not in positions:
+            raise KeyError("unknown station: %r" % (bow_station,))
         halves = {}
         for station in positions:
             poly = self.loft_body_line(station, body_points, skip_missing=True)
@@ -391,8 +415,19 @@ class Model:
                     left = left[1:]  # do not repeat a point on the centerline
                 lines[station] = [poly + left]
             else:
-                right_side = station == widest or positions[station] >= positions[widest]
-                left_side = station == widest or positions[station] <= positions[widest]
+                # forward is toward the bow station; by default the greater x
+                bow_x = positions[bow_station] if bow_station else float("inf")
+                if bow_x == positions[widest]:
+                    raise ValueError(
+                        "the bow station %r is the widest station" % (bow_station,)
+                    )
+                bow_is_right = bow_x > positions[widest]
+                forward = (positions[station] > positions[widest]) == bow_is_right
+                if station == widest:
+                    left_side = right_side = True
+                else:
+                    right_side = forward
+                    left_side = not forward
                 lines[station] = []
                 if left_side:
                     lines[station].append(mirrored(poly))

@@ -5,6 +5,8 @@ positive up. Half-breadths are the "1/2w Deck", "WL ..." and "... Plan" rows.
 Some cells hold two values ("0-2-0 and 0-3-0"); such points are skipped in the
 body lines.
 
+The bow is station 0 (``set_bow_station``); the stern, station 33, is at x = 0.
+
 Body plan sides (``body_sides``): ``"half"`` (default), ``"both"`` (both
 halves) or ``"split"`` (aft stations on the left, forward on the right).
 
@@ -32,6 +34,7 @@ class Project89(table_of_offsets.Model):
         super().__init__(
             os.path.join(os.path.dirname(__file__), "../sample_data/offset_table.csv")
         )
+        self.set_bow_station("0")  # the stem; the stern (station 33) is at x = 0
         # fmt: off
         self.set_under_waterline(
             {
@@ -99,7 +102,12 @@ class Project89(table_of_offsets.Model):
         """(virtual) we want two horizontal grid lines"""
         return [0, 10 * 12.0]
 
-    def body_lines(self, placement: str = "max_breadth", sides: str = "half"):
+    def body_lines(
+        self,
+        placement: str = "max_breadth",
+        sides: str = "half",
+        bow_station: str = None,
+    ):
         """Return {station: polyline} with the body plan line of every station.
 
         Points are (half-breadth, height above the LWL) in inches.
@@ -125,7 +133,9 @@ class Project89(table_of_offsets.Model):
         body_points += [(name, height) for name, height in wl.items()]
         # buttocks: height from the table, breadth is the buttock
         body_points += [(36.0, "B 3'"), (24.0, "B 2'"), (12.0, "B 1'")]
-        return self.loft_body_lines(body_points, placement, sides=sides)
+        return self.loft_body_lines(
+            body_points, placement, sides=sides, bow_station=bow_station
+        )
 
     def save_body_lines_as(
         self, filename_dxf: str, placement: str = "max_breadth", sides: str = "half"

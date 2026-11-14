@@ -29,6 +29,7 @@ class ProjectBlueMoon(table_of_offsets.Model):
                 "../sample_data_too/offset_table_blue_moon.csv",
             )
         )
+        self.set_bow_station("1")  # the stem; the stern (TRAN.) is at x = 0
         # fmt: off
         self.set_under_waterline(
             {
@@ -128,7 +129,12 @@ class ProjectBlueMoon(table_of_offsets.Model):
 
     # {'LWL to SHEER': 0, 'LWL to DECK EDG': 1, 'BASE TO B-3': 2, 'BASE TO B-2': 3, 'BASE TO B-1': 4, 'RABBET TO BASE': 5, 'KEEL TO BASE': 6, 'CENTERLINE SHAFT': 7, 'BASE TO TOP BAL.': 8, 'SHEER': 9, 'WL 2A': 10, 'WL 1A': 11, 'LWL': 12, 'WL 1B': 13, 'WL 2B': 14, 'RABBET': 15, 'KEEL': 16, 'BALLAST TOP': 17, 'D. UPPER': 18, 'D. LOWER': 19, nan: 20, 'RED-CORRECTED': 21}
 
-    def body_lines(self, placement: str = "max_breadth", sides: str = "half"):
+    def body_lines(
+        self,
+        placement: str = "max_breadth",
+        sides: str = "half",
+        bow_station: str = None,
+    ):
         """Return {station: polyline} with the body plan line of every station"""
         # (breadth, height) pairs. A string is a table row, a number is inches.
         wl = self.waterlines_positions()
@@ -148,7 +154,9 @@ class ProjectBlueMoon(table_of_offsets.Model):
             (24.0, "BASE TO B-2"),
             (12.0, "BASE TO B-1"),
         ]
-        return self.loft_body_lines(body_points, placement, sides=sides)
+        return self.loft_body_lines(
+            body_points, placement, sides=sides, bow_station=bow_station
+        )
 
     def save_body_lines_as(
         self, filename_dxf: str, placement: str = "max_breadth", sides: str = "half"
