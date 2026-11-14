@@ -86,7 +86,9 @@ A CSV file. The first column (header `#`) holds line names (`Sheer`, `B 3'`,
   it in `__init__`.
 
 With `placement="right"` the base line and the waterlines of the profile view
-are extended through the body plan and its vertical centerline is drawn
+are extended through the body plan, and its vertical centerline and its buttock
+lines (`buttocks_positions`, to the right of the centerline for
+`sides="half"`, on both sides otherwise) are drawn
 (`Model.body_plan_grid_options`, `Model.plot_grid`).
 
 Each tutorial script writes the full drawing, a variant with the body plan to

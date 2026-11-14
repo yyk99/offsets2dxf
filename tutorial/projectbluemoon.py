@@ -178,7 +178,7 @@ class ProjectBlueMoon(table_of_offsets.Model):
         if body_placement == "right":
             # run the base line and the waterlines through the body plan,
             # draw the body plan centerline
-            grid_options = self.body_plan_grid_options(body_lines)
+            grid_options = self.body_plan_grid_options(body_lines, body_sides)
 
         with table_of_offsets.DXF(filename_dxf) as dxf:
             self.plot_grid(dxf, **grid_options)

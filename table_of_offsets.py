@@ -222,6 +222,7 @@ class Model:
         dxf: object,
         profile_end_x: float = None,
         body_centerline: tuple = None,
+        body_buttocks: dict = None,
     ):
         """Draw the grid into ``dxf`` (a ``DXF`` object): central lines, one
         vertical line and label per station, waterlines and buttocks lines.
@@ -233,6 +234,10 @@ class Model:
 
         ``body_centerline`` - ``(x, bottom_y, top_y)``: draw the vertical
         centerline of a body plan there. See ``body_plan_grid_options``.
+
+        ``body_buttocks`` - ``{name: [x, ...]}``: draw the buttock lines of the
+        body plan as vertical lines at these x, as high as ``body_centerline``
+        (which must be given too).
         """
 
         stations = self.station_positions()
@@ -251,6 +256,10 @@ class Model:
             x, bottom_y, top_y = body_centerline
             dxf.add_grid_polyline([(x, bottom_y), (x, top_y)])
             dxf.text((x + 1, top_y - 2), "CL")
+            for name, buttock_xs in (body_buttocks or {}).items():
+                for bx in buttock_xs:
+                    dxf.add_grid_polyline([(bx, bottom_y), (bx, top_y)])
+                    dxf.text((bx + 1, top_y - 2), name)
 
         # draw station lines
         bottom_y, top_y = self.drawing_area_vertical_borders()
@@ -443,24 +452,32 @@ class Model:
             }
         return lines
 
-    def body_plan_grid_options(self, lines: dict, margin: float = 12.0):
+    def body_plan_grid_options(
+        self, lines: dict, sides: str = "half", margin: float = 12.0
+    ):
         """Keyword arguments for ``plot_grid`` for a body plan placed to the
         right of the profile view (``lines`` as returned by ``loft_body_lines``
-        with ``placement="right"``): the base line and the waterlines run
-        through the body plan, and its vertical centerline is drawn.
+        with ``placement="right"`` and the same ``sides``): the base line and
+        the waterlines run through the body plan, its vertical centerline and
+        its buttock lines (``buttocks_positions``) are drawn. The buttocks are
+        on the right of the centerline for ``sides="half"``, on both sides
+        otherwise.
         """
         polylines = self.body_polylines(lines)
         if not polylines or self.body_plan_centerline_x is None:
             return {}
+        cl = self.body_plan_centerline_x
         xs = [x for p in polylines for x, _ in p]
         ys = [y for p in polylines for _, y in p]
+        buttocks = {}
+        for name, offset in self.buttocks_positions().items():
+            buttocks[name] = [cl + offset]
+            if sides != "half":
+                buttocks[name].insert(0, cl - offset)
         return {
             "profile_end_x": max(xs) + margin,
-            "body_centerline": (
-                self.body_plan_centerline_x,
-                min(ys) - margin,
-                max(ys) + margin,
-            ),
+            "body_centerline": (cl, min(ys) - margin, max(ys) + margin),
+            "body_buttocks": buttocks,
         }
 
     @staticmethod

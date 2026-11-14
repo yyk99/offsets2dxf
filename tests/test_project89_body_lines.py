@@ -134,6 +134,38 @@ class Test_Project89BodyLines(unittest.TestCase):
             vertical = [g for g in grid if len(g) == 2 and g[0][0] == g[1][0] == cl_x]
             self.assertEqual(1, len(vertical))
 
+    def test_buttocks_in_body_plan(self):
+        def vertical_grid_x(**kwargs):
+            with tempfile.TemporaryDirectory() as tmp:
+                out = os.path.join(tmp, "p89.dxf")
+                self.project.save_model_as(out, **kwargs)
+                doc = ezdxf.readfile(out)
+                xs = set()
+                for e in doc.modelspace():
+                    if e.dxf.layer == "grid" and e.dxftype() == "POLYLINE":
+                        pts = [tuple(p)[:2] for p in e.points()]
+                        if len(pts) == 2 and pts[0][0] == pts[1][0]:
+                            xs.add(pts[0][0])
+                # leave out the station lines
+                return xs - set(self.project.station_positions().values())
+
+        project = self.project
+        right = vertical_grid_x(body_placement="right")
+        cl = project.body_plan_centerline_x
+        for offset in project.buttocks_positions().values():
+            self.assertIn(cl + offset, right)
+            self.assertNotIn(cl - offset, right)
+
+        both = vertical_grid_x(body_placement="right", body_sides="split")
+        cl = project.body_plan_centerline_x
+        for offset in project.buttocks_positions().values():
+            self.assertIn(cl + offset, both)
+            self.assertIn(cl - offset, both)
+
+        # nothing is added for the default placement
+        default = vertical_grid_x()
+        self.assertEqual(set(), default)
+
     def test_no_centerline_for_default_placement(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = os.path.join(tmp, "p89.dxf")
