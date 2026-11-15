@@ -138,9 +138,12 @@ class ProjectFerrocement(table_of_offsets.Model):
     def save_body_lines_as(
         self, filename_dxf: str, placement: str = "max_breadth", sides: str = None
     ):
-        """Save the body lines only (no grid, no plan/profile lines)"""
+        """Save the body lines and their grid (base line, centerline,
+        waterlines, buttocks); no plan/profile lines"""
         with self.open_dxf(filename_dxf) as dxf:
-            self.plot_body_lines(dxf, self.body_lines(placement, sides))
+            lines = self.body_lines(placement, sides)
+            self.plot_body_plan_grid(dxf, lines)
+            self.plot_body_lines(dxf, lines)
 
     def save_station_as(self, filename_dxf: str, station: str = "6"):
         """Save the body line of one station for checking the data: every point

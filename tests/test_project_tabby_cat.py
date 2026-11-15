@@ -48,6 +48,19 @@ class Test_ProjectTabbyCat(unittest.TestCase):
         self.assertEqual("Breadth WL V", self.project.waterline_row("DWL"))
         self.assertEqual("Breadth WL VIII", self.project.waterline_row("WL 8"))
 
+    def test_sheer_line_skips_station_without_sheer_breadth(self):
+        """station 1 has no Breadth Sheer (the table): the sheer line starts at
+        the station 2, not at the highest point of the station 1 (WL VIII)"""
+        lines = self.project.body_lines("raw", "half")
+        (sheer,) = self.project.body_sheer_polylines(lines)
+        self.assertEqual(11, len(sheer))
+        # station 12 is at x = 0, station 2 is the 10th (the bow is station 1)
+        self.assertEqual((610, 2155), (round(sheer[-1][0] / MM), round(sheer[-1][1] / MM)))
+        self.assertEqual((1150, 1610), (round(sheer[0][0] / MM), round(sheer[0][1] / MM)))
+        # the highest point of the station 1 is not on the sheer line
+        (poly,) = lines["1"]
+        self.assertNotIn(poly[0], sheer)
+
     def test_body_line_station_6(self):
         (poly,) = self.project.body_lines("raw")["6"]
         points = [(round(x / MM), round(y / MM)) for x, y in poly]

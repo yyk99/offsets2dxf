@@ -153,6 +153,14 @@ def offset_to_inches(value: str, unit: str = "ftin") -> float:
     return float(value) * TableOfOffsets.UNITS[unit]
 
 
+class BodyLines(dict):
+    """The result of ``Model.loft_body_lines``: ``{station: [polyline, ...]}``
+    with the attribute ``sheer``, the sheer line (see
+    ``Model.body_sheer_polylines``)."""
+
+    sheer = ()
+
+
 class Model:
     """A boat's table of offsets (loaded from CSV) and the geometry lofted from it.
 
@@ -630,7 +638,13 @@ class Model:
         if bow_station is not None and bow_station not in positions:
             raise KeyError("unknown station: %r" % (bow_station,))
         halves = {}
+        sheer_points = {}
         for station in positions:
+            # the first body point is the sheer; a station without it (an
+            # empty cell) has no sheer point
+            sheer = self.loft_body_line(station, body_points[:1], skip_missing=True)
+            if sheer:
+                sheer_points[station] = sheer[0]
             poly = self.loft_body_line(station, body_points, skip_missing=True)
             poly.sort(key=lambda pt: -pt[1])
             if keel_link and poly and poly[-1][0] != 0:
@@ -648,12 +662,15 @@ class Model:
             return [(-x, y) for x, y in poly]
 
         lines = {}
+        flags = {}  # station: (drawn on the left, drawn on the right)
         for station, poly in halves.items():
             if not poly:
                 lines[station] = []
             elif sides == "half":
+                flags[station] = (False, True)
                 lines[station] = [poly]
             elif sides == "both":
+                flags[station] = (True, True)
                 left = mirrored(poly)[::-1]
                 if poly[-1][0] == 0:
                     left = left[1:]  # do not repeat a point on the centerline
@@ -672,11 +689,25 @@ class Model:
                 else:
                     right_side = forward
                     left_side = not forward
+                flags[station] = (left_side, right_side)
                 lines[station] = []
                 if left_side:
                     lines[station].append(mirrored(poly))
                 if right_side:
                     lines[station].append(poly)
+
+        # the sheer line: the sheer points of the stations of a side, from the
+        # first station to the last
+        sheer = []
+        for side in (0, 1):
+            pts = [
+                (-sheer_points[s][0] if side == 0 else sheer_points[s][0],
+                 sheer_points[s][1])
+                for s in sorted(sheer_points, key=lambda st: positions[st])
+                if flags.get(s, (False, False))[side]
+            ]
+            if len(pts) > 1:
+                sheer.append(pts)
 
         x0 = self.body_plan_origin_x(lines, placement, gap, widest)
         self.body_plan_centerline_x = x0
@@ -685,7 +716,10 @@ class Model:
                 s: [[(x + x0, y) for x, y in p] for p in polys]
                 for s, polys in lines.items()
             }
-        return lines
+            sheer = [[(x + x0, y) for x, y in p] for p in sheer]
+        result = BodyLines(lines)
+        result.sheer = sheer
+        return result
 
     @staticmethod
     def body_plan_sides(placement: str, sides: str = None):
@@ -725,10 +759,48 @@ class Model:
             "body_buttocks": buttocks,
         }
 
-    def plot_body_lines(self, dxf: object, lines: dict, labels: bool = True):
+    def plot_body_plan_grid(self, dxf: object, lines: dict, margin: float = 12.0):
+        """Draw the grid of a body plan alone (no profile view) into ``dxf``:
+        the base line, the waterlines (``waterlines_positions``) with their
+        names, the vertical centerline ``CL`` and the buttock lines
+        (``buttocks_positions``). ``lines`` is as returned by
+        ``loft_body_lines`` (its centerline is ``body_plan_centerline_x``). The
+        buttocks are drawn on both sides of the centerline if any body line is
+        to the left of it, otherwise on the right only.
+        """
+        polylines = self.body_polylines(lines)
+        if not polylines or self.body_plan_centerline_x is None:
+            return
+        cl = self.body_plan_centerline_x
+        xs = [x for p in polylines for x, _ in p]
+        ys = [y for p in polylines for _, y in p]
+        waterlines = self.waterlines_positions()
+        base_y = self.grid_y_origins()[0]
+        left = min(xs + [cl]) - margin
+        right = max(xs + [cl]) + margin
+        bottom = min(ys + [base_y]) - margin
+        top = max(ys + list(waterlines.values())) + margin
+
+        for name, y in [("baseline", base_y)] + list(waterlines.items()):
+            dxf.add_grid_polyline([(left, y), (right, y)])
+            dxf.text((left + 1, y + 1), name)
+            dxf.text((right - 1, y + 1), name, align="right")
+
+        dxf.add_grid_polyline([(cl, bottom), (cl, top)])
+        dxf.text((cl + 1, top - 2), "CL")
+        both = min(xs) < cl
+        for name, offset in self.buttocks_positions().items():
+            for bx in [cl + offset] + ([cl - offset] if both else []):
+                dxf.add_grid_polyline([(bx, bottom), (bx, top)])
+                dxf.text((bx + 1, top - 2), name)
+
+    def plot_body_lines(
+        self, dxf: object, lines: dict, labels: bool = True, sheer: bool = True
+    ):
         """Draw the body lines (as returned by ``loft_body_lines``) into
         ``dxf``. With ``labels`` the station name is written above the top end
-        of every body line.
+        of every body line. With ``sheer`` the sheer line is drawn too, see
+        ``body_sheer_polylines``.
         """
         for station, polys in lines.items():
             for poly in polys:
@@ -739,6 +811,20 @@ class Model:
                     # the highest point; the polylines run from the top down
                     x, y = max(poly, key=lambda pt: pt[1])
                     dxf.text((x, y + 1), station, align="center")
+        if sheer:
+            for poly in self.body_sheer_polylines(lines):
+                dxf.add_red_polyline(poly)
+
+    def body_sheer_polylines(self, lines: dict):
+        """The sheer line of a body plan (``lines`` as returned by
+        ``loft_body_lines``): the sheer points of the consecutive stations
+        joined by a polyline, one polyline per side of the centerline: up to
+        two for ``sides="split"`` or ``"both"``, one for ``"half"``. The sheer
+        point is the first of the ``body_points``; a station whose table cell
+        for it is empty is skipped. Returns ``[polyline, ...]``, each with at
+        least 2 points.
+        """
+        return list(getattr(lines, "sheer", ()))
 
     @staticmethod
     def body_polylines(lines: dict):

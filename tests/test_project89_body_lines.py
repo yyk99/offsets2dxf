@@ -197,6 +197,60 @@ class Test_Project89BodyLines(unittest.TestCase):
             texts = [e.dxf.text for e in doc.modelspace() if e.dxftype() == "TEXT"]
             self.assertNotIn("CL", texts)
 
+    def test_body_lines_file_has_grid(self):
+        """the body lines file shows the grid: base line, CL, waterlines and
+        buttocks"""
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "p89_body.dxf")
+            self.project.save_body_lines_as(out)
+            msp = ezdxf.readfile(out).modelspace()
+            grid = [e for e in msp if e.dxf.layer == "grid"]
+            labels = [e.dxf.text for e in msp if e.dxftype() == "TEXT"]
+            n_wl = len(self.project.waterlines_positions())
+            n_b = len(self.project.buttocks_positions())
+            # base line + waterlines + CL + buttocks on both sides (split)
+            self.assertEqual(1 + n_wl + 1 + 2 * n_b, len(grid))
+            self.assertIn("CL", labels)
+            self.assertIn("baseline", labels)
+            for name in self.project.waterlines_positions():
+                self.assertIn(name, labels)
+
+    def test_sheer_line(self):
+        """the sheer points of the consecutive stations are joined, one line
+        per side of the centerline"""
+        lines = self.project.body_lines("raw", "split")
+        left, right = None, None
+        for poly in self.project.body_sheer_polylines(lines):
+            if poly[0][0] < 0:
+                left = poly
+            else:
+                right = poly
+        self.assertIsNotNone(left)
+        self.assertIsNotNone(right)
+        # the points are the sheer points of the table, not the highest points
+        first = ("1/2w Deck", "Sheer")
+        expected = []
+        for station, polys in lines.items():
+            sp = self.project.loft_body_line(station, [first], skip_missing=True)
+            for poly in polys:
+                if sp:
+                    expected.append((sp[0][0] if poly[0][0] > 0 else -sp[0][0], sp[0][1]))
+        self.assertEqual(sorted(expected), sorted(left + right))
+        self.assertEqual(len(left), len(set(left)))
+        # half: only one line, on the right
+        half = self.project.body_lines("raw", "half")
+        (only,) = self.project.body_sheer_polylines(half)
+        # a station without the sheer cell is skipped
+        n_sheer = len(
+            [s for s in half if self.project.loft_body_line(s, [first], True)]
+        )
+        self.assertEqual(len(only), n_sheer)
+        self.assertLess(n_sheer, len([s for s in half if half[s]]))
+        # both: the sheer of the left half is the mirror of the right one
+        both = self.project.body_lines("raw", "both")
+        l, r = sorted(self.project.body_sheer_polylines(both), key=lambda p: p[0][0])
+        self.assertEqual(sorted((-x, y) for x, y in l), sorted(r))
+
     def test_station_labels(self):
         """every body line has its station name above its top end"""
         with tempfile.TemporaryDirectory() as tmp:
@@ -204,10 +258,17 @@ class Test_Project89BodyLines(unittest.TestCase):
             self.project.save_body_lines_as(out)
             doc = ezdxf.readfile(out)
             red = [e for e in doc.modelspace() if e.dxf.layer == "red"]
-            texts = [e for e in doc.modelspace() if e.dxftype() == "TEXT"]
-            self.assertEqual(len(red), len(texts))
-
             lines = self.project.body_lines()
+            # the grid labels (CL, waterlines, buttocks) are texts as well
+            texts = [
+                e
+                for e in doc.modelspace()
+                if e.dxftype() == "TEXT" and e.dxf.text in lines
+            ]
+            # a label per body line; the sheer lines have none
+            n_sheer = len(self.project.body_sheer_polylines(self.project.body_lines()))
+            self.assertEqual(len(red) - n_sheer, len(texts))
+
             expected = sorted(
                 (station, round(max(p, key=lambda pt: pt[1])[0], 3),
                  round(max(p, key=lambda pt: pt[1])[1] + 1, 3))
@@ -226,8 +287,9 @@ class Test_Project89BodyLines(unittest.TestCase):
             self.project.save_body_lines_as(out)  # the default: split
             doc = ezdxf.readfile(out)
             red = [e for e in doc.modelspace() if e.dxf.layer == "red"]
-            # one polyline per station, two for the midship station
-            self.assertEqual(19, len(red))
+            # one polyline per station, two for the midship station, and the
+            # sheer line of each side
+            self.assertEqual(19 + 2, len(red))
 
 
 if __name__ == "__main__":

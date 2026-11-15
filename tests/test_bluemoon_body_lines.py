@@ -74,7 +74,8 @@ class Test_BlueMoonBodyLines(unittest.TestCase):
             self.assertTrue(os.path.exists(out))
             doc = ezdxf.readfile(out)
             red = [e for e in doc.modelspace() if e.dxf.layer == "red"]
-            self.assertEqual(9, len(red))  # one polyline per station
+            # one polyline per station and the sheer line of each side
+            self.assertEqual(9 + 2, len(red))
             # the drawing is symmetric about the centerline x = 0
             xs = [p[0] for e in red for p in e.points()]
             self.assertAlmostEqual(max(xs), -min(xs))
