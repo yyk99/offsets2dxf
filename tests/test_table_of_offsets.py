@@ -266,6 +266,88 @@ class Test_WaterlineBodyPoints(unittest.TestCase):
         )
 
 
+class Test_Diagonals(unittest.TestCase):
+    """the diagonals: (y0, x1, y1), the table gives the distance along the
+    line from (0, y0)"""
+
+    class Model(table_of_offsets.Model):
+        def diagonals_positions(self):
+            # a 3-4-5 line: from (0, 10) through (24, 28); "NOT IN TABLE" has
+            # no row
+            return {"1": (10.0, 24.0, 28.0), "NOT IN TABLE": (0.0, 1.0, 1.0)}
+
+        def diagonal_row(self, name):
+            return "Diagonal " + name
+
+    def setUp(self):
+        csv = os.path.join(source_directory, "sample_data", "offset_table.csv")
+        self.model = self.Model(csv)
+
+    def test_default_has_no_diagonals(self):
+        model = table_of_offsets.Model(
+            os.path.join(source_directory, "sample_data", "offset_table.csv")
+        )
+        self.assertEqual({}, model.diagonals_positions())
+        self.assertEqual([], model.diagonal_body_points())
+        self.assertEqual("Diagonal 1", model.diagonal_row("Diagonal 1"))
+
+    def test_diagonal_point(self):
+        point = table_of_offsets.DiagonalPoint("row", 10.0, 24.0, 28.0)
+        # the direction (24, 18) / 30 = (0.8, 0.6)
+        x, y = point.point(10.0)
+        self.assertAlmostEqual(8.0, x)
+        self.assertAlmostEqual(16.0, y)
+        self.assertEqual((0.0, 10.0), point.point(0.0))
+        with self.assertRaises(ValueError):
+            table_of_offsets.DiagonalPoint("row", 5.0, 0.0, 5.0)
+
+    def test_body_points_of_the_diagonals(self):
+        (point,) = self.model.diagonal_body_points()  # the row is in the table
+        self.assertEqual("Diagonal 1", point.row)
+
+    def test_body_line_points(self):
+        lines = self.model.loft_body_lines([], "raw")
+        # station 18: Diagonal 1 is 1-6-2 = 18.25 in
+        x, y = 0.8 * 18.25, 10.0 + 0.6 * 18.25
+        self.assertEqual(1, len(lines["18"][0]) - 1)  # and the keel link
+        self.assertAlmostEqual(x, lines["18"][0][0][0])
+        self.assertAlmostEqual(y, lines["18"][0][0][1])
+        # the stations without the cell have no point
+        self.assertEqual([], lines["33"])
+
+    def test_plan_lines(self):
+        """the diagonal in the plan view is below the centerline: y = origin
+        - half-breadth of the hull point"""
+        lines = self.model.loft_diagonal_plan_lines(origin_y=100.0)
+        self.assertEqual(["1"], list(lines))
+        positions = self.model.station_positions()
+        poly = lines["1"]
+        # one point per station that has the cell, in the order of the stations
+        cells = [
+            s
+            for s in positions
+            if isinstance(self.model._too.loc[self.model.line_to_index("Diagonal 1"), s], str)
+        ]
+        self.assertEqual([positions[s] for s in cells], [x for x, _ in poly])
+        # station 18: 18.25 in along the diagonal (0.8, 0.6): half-breadth 14.6
+        self.assertIn((positions["18"], 100.0 - 0.8 * 18.25), poly)
+        for _, y in poly:
+            self.assertLess(y, 100.0)
+        # the default origin: 0, as there is one grid_y_origins only
+        default = self.model.loft_diagonal_plan_lines()
+        self.assertEqual(len(poly), len(default["1"]))
+        for (x, y), (x2, y2) in zip(poly, default["1"]):
+            self.assertEqual(x, x2)
+            self.assertAlmostEqual(y - 100.0, y2)
+
+    def test_segments(self):
+        segments = self.model.diagonal_segments(5.0, both=True)
+        self.assertEqual(
+            {"1": [((5.0, 10.0), (29.0, 28.0)), ((5.0, 10.0), (-19.0, 28.0))]},
+            {k: v for k, v in segments.items() if k == "1"},
+        )
+
+
 class Test_Output(unittest.TestCase):
     def test_output_dir_from_args(self):
         f = table_of_offsets.output_dir_from_args

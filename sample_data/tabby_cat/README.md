@@ -20,8 +20,8 @@ Files:
   KVL), D1, D2 = diagonals.
 - `teoreticheskiy_chertezh_tebbi_ket.jpg` - the lines plan (profile, plan)
   and the table.
-- `konstruktivnyy_midel-shpangout_2.jpg` - the construction midship section
-  (not used).
+- `konstruktivnyy_midel-shpangout_2.jpg` - the construction midship section;
+  its body plan shows the lines of the diagonals D1 and D2 with dimensions.
 
 Known about the hull (not in the table):
 
@@ -36,4 +36,9 @@ Known about the hull (not in the table):
 
 `tutorial/project_tabby_cat.py` reads the table with
 `Model(csv, unit="mm")` and draws the profile, the plan and the body lines;
-see the assumptions in its docstring. The diagonals are not used.
+see the assumptions in its docstring. The diagonals D1 and D2 are drawn in the
+construction midsection (`konstruktivnyy_midel-shpangout_2.jpg`): both lines
+start on the centerline 1700 mm above the baseline; D1 ends on the baseline
+1100 mm from the centerline, D2 ends 1850 mm from the centerline on the design
+waterline (1000 mm). The table gives the distance along them from the start to
+the hull.

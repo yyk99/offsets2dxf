@@ -81,14 +81,118 @@ class Test_ProjectTabbyCat(unittest.TestCase):
         self.assertEqual((35, 850), points[-1])  # station 1
         self.assertIn((85, 316), points)  # station 6
 
+    def test_diagonals_definition(self):
+        """the lines of the diagonals as dimensioned in the construction
+        midsection: from 1700 mm above the baseline on the centerline"""
+        self.assertEqual(
+            {
+                "D1": (1700 * MM, 1100 * MM, 0.0),
+                "D2": (1700 * MM, 1850 * MM, 1000 * MM),
+            },
+            self.project.diagonals_positions(),
+        )
+        self.assertEqual("Diagonal D1", self.project.diagonal_row("D1"))
+        # D2 ends on the design waterline
+        self.assertAlmostEqual(
+            self.project.diagonals_positions()["D2"][2],
+            self.project.waterlines_positions()["DWL"],
+        )
+
+    def test_diagonal_points(self):
+        """the point of a diagonal is on its line, as far from (0, y0) as the
+        table says"""
+        import math
+
+        for name, (y0, x1, y1) in self.project.diagonals_positions().items():
+            row = self.project.diagonal_row(name)
+            for station in ("2", "6", "12"):
+                distance = self.project.breadth_at(station, row)
+                (x, y) = [
+                    (x, y)
+                    for x, y, bs, _ in self.project.loft_body_line_sources(
+                        station, self.project.body_points()
+                    )
+                    if bs == row
+                ][0]
+                self.assertAlmostEqual(distance, math.hypot(x, y - y0), places=6)
+                self.assertAlmostEqual((y - y0) * x1, (y1 - y0) * x, places=6)
+
+    def test_diagonals_agree_with_the_table(self):
+        """the diagonal points are on the sections made of the other points
+        of the table (within 10 mm): the table and the drawn diagonals agree.
+        Not at the station 1: its section has no points above WL VIII (no
+        sheer breadth)"""
+        import math
+
+        def is_diagonal(source):
+            return isinstance(source, str) and source.startswith("Diagonal")
+
+        def dist(p, a, b):
+            ex, ey = b[0] - a[0], b[1] - a[1]
+            t = ((p[0] - a[0]) * ex + (p[1] - a[1]) * ey) / (ex * ex + ey * ey)
+            t = max(0.0, min(1.0, t))
+            return math.hypot(p[0] - a[0] - t * ex, p[1] - a[1] - t * ey)
+
+        for station in [str(n) for n in range(2, 13)]:
+            srcs = self.project.loft_body_line_sources(
+                station, self.project.body_points()
+            )
+            others = [(x, y) for x, y, bs, _ in srcs if not is_diagonal(bs)]
+            for x, y, bs, _ in srcs:
+                if is_diagonal(bs):
+                    d = min(dist((x, y), a, b) for a, b in zip(others, others[1:]))
+                    self.assertLess(d / MM, 10, (station, bs))
+
+    def test_diagonal_plan_lines(self):
+        """the diagonals in the plan view, below the plan centerline (the
+        waterlines and the sheer are above it)"""
+        lines = self.project.loft_diagonal_plan_lines()
+        self.assertEqual(["D1", "D2"], list(lines))
+        origin = self.project.grid_y_origins()[1]
+        positions = self.project.station_positions()
+        for name, poly in lines.items():
+            self.assertEqual(12, len(poly))
+            self.assertEqual([positions[s] for s in positions], [x for x, _ in poly])
+            for _, y in poly:
+                self.assertLess(y, origin)
+        # station 6, D1: 1190 mm along the line to (1100, 0) from (0, 1700):
+        # the half-breadth of the hull point is 1190 * 1100 / 2025
+        d1 = dict(lines["D1"])
+        self.assertAlmostEqual(
+            1190 * 1100 / (1100**2 + 1700**2) ** 0.5,
+            (origin - d1[positions["6"]]) / MM,
+            places=3,
+        )
+        # the plan view is drawn in the model file: the red lines include them
+        import tempfile
+        import ezdxf
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "tabby_cat.dxf")
+            self.project.save_model_as(out)
+            msp = ezdxf.readfile(out).modelspace()
+            texts = [e.dxf.text for e in msp if e.dxftype() == "TEXT"]
+            self.assertIn("D1", texts)
+            self.assertIn("D2", texts)
+
+    def test_diagonals_in_the_grid(self):
+        segments = self.project.diagonal_segments(10.0, both=True)
+        self.assertEqual(["D1", "D2"], list(segments))
+        (a, b), (c, d) = segments["D1"]
+        self.assertEqual((10.0, 1700 * MM), a)
+        self.assertAlmostEqual(10.0 + 1100 * MM, b[0])
+        self.assertAlmostEqual(0.0, b[1])
+        self.assertAlmostEqual(10.0 - 1100 * MM, d[0])  # mirror image
+
     def test_body_line_station_6(self):
         (poly,) = self.project.body_lines("raw")["6"]
         points = [(round(x / MM), round(y / MM)) for x, y in poly]
         # sheer, 8 waterlines, 4 buttocks, the rabbet (breadth 85 mm) and the
         # keel (316 mm: a straight line between the stations 5 and 10); the
         # dashes of the source
-        # and the horizontal link from the keel to the centerline
-        self.assertEqual(1 + 8 + 4 + 2 + 1, len(points))
+        # the 2 diagonals and the horizontal link from the keel to the
+        # centerline
+        self.assertEqual(1 + 8 + 4 + 2 + 2 + 1, len(points))
         self.assertEqual((0, 316), points[-1])
         self.assertIn((85, 515), points)
         self.assertIn((85, 316), points)  # Breadth Keel, Height Keel

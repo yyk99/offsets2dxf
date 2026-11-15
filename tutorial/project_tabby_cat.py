@@ -7,8 +7,9 @@ in millimetres (``unit="mm"``); the model works in inches.
 Table layout: stations ``1`` .. ``12``; rows named ``Height ...`` are heights
 above the baseline (Sheer, Buttock 1-4, Rabbet, Keel), rows named
 ``Breadth ...`` are half-breadths from the centerline (Sheer, WL I-VIII,
-Rabbet, Keel; the last one is assumed by the designer). The cells marked "-" in the source are empty. The diagonals are not
-drawn.
+Rabbet, Keel; the last one is assumed by the designer). The cells marked "-" in the source are empty. The diagonals D1 and D2 (rows
+``Diagonal D1``, ``Diagonal D2``) are distances along the lines of
+``DIAGONALS_MM`` from the centerline, see ``diagonals_positions``.
 
 Known about the hull (not in the table; confirmed):
 
@@ -44,6 +45,13 @@ BUTTOCK_DISTANCE_MM = 300.0
 DWL_NUMBER = 5  # the design waterline is "WL V" of the table
 # heights of the waterlines WL 1 .. WL 8 above the baseline, mm
 WATERLINE_HEIGHTS_MM = [600, 700, 800, 900, 1000, 1150, 1300, 1450]
+# the diagonals D1 and D2 of the body plan: (y0, x1, y1), mm. The lines run
+# from the centerline at y0 above the baseline to the point (x1, y1), as
+# dimensioned in the construction midsection (konstruktivnyy_midel-
+# shpangout_2.jpg): both start 1700 mm above the baseline; D1 ends on the
+# baseline 1100 mm from the centerline, D2 ends 1850 mm from the centerline on
+# the design waterline (1000 mm).
+DIAGONALS_MM = {"D1": (1700, 1100, 0), "D2": (1700, 1850, 1000)}
 ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII"]
 
 
@@ -98,6 +106,16 @@ class ProjectTabbyCat(table_of_offsets.Model):
 
     def drawing_area_vertical_borders(self):
         return (self._y_plan - 20, 110.0)
+
+    def diagonal_row(self, name: str) -> str:
+        return "Diagonal " + name
+
+    def diagonals_positions(self):
+        """{name: (y0, x1, y1)} of D1 and D2, see ``DIAGONALS_MM``"""
+        return {
+            name: (y0 * MM, x1 * MM, y1 * MM)
+            for name, (y0, x1, y1) in DIAGONALS_MM.items()
+        }
 
     def keel_body_point(self):
         return ("Breadth Keel", "Height Keel")
@@ -188,6 +206,9 @@ class ProjectTabbyCat(table_of_offsets.Model):
                 + ["Breadth Sheer"]
             ):
                 dxf.add_red_polyline(self.loft_line_n(self.line_to_index(name)))
+
+            # the diagonals in the plan view, below its centerline
+            self.plot_diagonal_plan_lines(dxf)
 
             # body plan
             self.plot_body_lines(dxf, body_lines)

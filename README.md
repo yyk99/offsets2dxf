@@ -113,6 +113,20 @@ whose half-breadth row is in the table (the row name is the waterline name;
 override `Model.waterline_row(name)` if it differs, e.g. "WL 1" ->
 "Breadth WL 1"). The height is the position of the waterline.
 
+The diagonals of a body plan are given by the overridable
+`Model.diagonals_positions()`: `{name: (y0, x1, y1)}` in inches, heights above
+the base line. A diagonal is the straight line from the point `(0, y0)` on the
+centerline through the point `(x1, y1)`; the table cell of a station is the
+distance along that line from `(0, y0)` to the hull (the row name is the
+diagonal name, or `Model.diagonal_row(name)`). Like the waterlines, the hull
+points of the diagonals that have a row in the table are added to every body
+line (`Model.diagonal_body_points`, `DiagonalPoint`), and the diagonals are
+drawn as grid lines, named at the second point (`Model.diagonal_segments`).
+In the plan view the half-breadths of the diagonal points are drawn below the
+centre line, opposite to the waterlines (`Model.loft_diagonal_plan_lines`,
+`Model.plot_diagonal_plan_lines`).
+The default is no diagonals.
+
 The first of the `body_points` is the sheer. `loft_body_lines` joins the
 sheer points of the consecutive stations into the sheer line, one polyline per
 side of the centerline. A station whose table cell for the sheer is empty is
@@ -135,7 +149,8 @@ station name above the top end of every body line (`labels=False` to omit)
 and the sheer, rabbet and keel lines (`sheer=False`, `rabbet=False`,
 `keel=False` to omit).
 `Model.plot_body_plan_grid(dxf, lines)` draws the grid of a body plan alone:
-the base line, the waterlines, the centerline `CL` and the buttock lines.
+the base line, the waterlines, the centerline `CL`, the buttock lines and the
+diagonals.
 
 Each tutorial script writes the full drawing, a variant with the body plan to
 the right, a split one and a body-lines-only file (with the grid, the sheer,
