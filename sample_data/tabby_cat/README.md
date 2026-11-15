@@ -9,7 +9,10 @@ Files:
   millimetres. Stations `1`..`12`; rows `Height ...` (above the baseline:
   Sheer, Buttock 1-4, Rabbet, Keel), `Breadth ...` (half-breadths from the
   centerline: Sheer, WL I-VIII, Rabbet) and `Diagonal D1`, `D2`. A dash in the
-  source is an empty cell. Row names are English; the source names are
+  source is an empty cell, except `Breadth Rabbet` at the stations 5-8, which
+  is 85 mm like at the stations 4 and 9, and `Height Keel` at the stations 6-9,
+  which is a straight line from station 5 (345) to station 10 (200): 316, 287,
+  258, 229 (the source has dashes there). Row names are English; the source names are
   Bort (LB) = Sheer, Batoks B1-B4 = Buttock 1-4, Shpunt (Shp.) = Rabbet, Kil
   (LK) = Keel, Vaterliniya VLI-VLVIII = WL I-VIII (VLV is the design waterline,
   KVL), D1, D2 = diagonals.
