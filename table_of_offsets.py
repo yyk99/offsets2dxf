@@ -155,10 +155,13 @@ def offset_to_inches(value: str, unit: str = "ftin") -> float:
 
 class BodyLines(dict):
     """The result of ``Model.loft_body_lines``: ``{station: [polyline, ...]}``
-    with the attribute ``sheer``, the sheer line (see
-    ``Model.body_sheer_polylines``)."""
+    with the attributes ``sheer``, ``rabbet`` and ``keel``, the sheer line, the
+    rabbet line and the keel line (see ``Model.body_sheer_polylines``,
+    ``Model.body_rabbet_polylines`` and ``Model.body_keel_polylines``)."""
 
     sheer = ()
+    rabbet = ()
+    keel = ()
 
 
 class Model:
@@ -638,13 +641,15 @@ class Model:
         if bow_station is not None and bow_station not in positions:
             raise KeyError("unknown station: %r" % (bow_station,))
         halves = {}
-        sheer_points = {}
+        # the first body point is the sheer, the rabbet is given by
+        # rabbet_body_point(); a station without it (an empty cell) has no
+        # such point
+        sheer_points = self._station_points(positions, body_points[:1])
+        rabbet = self.rabbet_body_point()
+        rabbet_points = self._station_points(positions, [rabbet] if rabbet else [])
+        keel = self.keel_body_point()
+        keel_points = self._station_points(positions, [keel] if keel else [])
         for station in positions:
-            # the first body point is the sheer; a station without it (an
-            # empty cell) has no sheer point
-            sheer = self.loft_body_line(station, body_points[:1], skip_missing=True)
-            if sheer:
-                sheer_points[station] = sheer[0]
             poly = self.loft_body_line(station, body_points, skip_missing=True)
             poly.sort(key=lambda pt: -pt[1])
             if keel_link and poly and poly[-1][0] != 0:
@@ -696,18 +701,9 @@ class Model:
                 if right_side:
                     lines[station].append(poly)
 
-        # the sheer line: the sheer points of the stations of a side, from the
-        # first station to the last
-        sheer = []
-        for side in (0, 1):
-            pts = [
-                (-sheer_points[s][0] if side == 0 else sheer_points[s][0],
-                 sheer_points[s][1])
-                for s in sorted(sheer_points, key=lambda st: positions[st])
-                if flags.get(s, (False, False))[side]
-            ]
-            if len(pts) > 1:
-                sheer.append(pts)
+        sheer = self._joined_points(sheer_points, flags, positions)
+        rabbet = self._joined_points(rabbet_points, flags, positions)
+        keel = self._joined_points(keel_points, flags, positions)
 
         x0 = self.body_plan_origin_x(lines, placement, gap, widest)
         self.body_plan_centerline_x = x0
@@ -717,10 +713,57 @@ class Model:
                 for s, polys in lines.items()
             }
             sheer = [[(x + x0, y) for x, y in p] for p in sheer]
+            rabbet = [[(x + x0, y) for x, y in p] for p in rabbet]
+            keel = [[(x + x0, y) for x, y in p] for p in keel]
         result = BodyLines(lines)
         result.sheer = sheer
+        result.rabbet = rabbet
+        result.keel = keel
         return result
 
+    def _station_points(self, positions: dict, body_points: list) -> dict:
+        """``{station: (breadth, height)}`` of the one point in ``body_points``
+        (a list of at most one item) for the stations that have it in the
+        table."""
+        points = {}
+        if body_points:
+            for station in positions:
+                pt = self.loft_body_line(station, body_points, skip_missing=True)
+                if pt:
+                    points[station] = pt[0]
+        return points
+
+    @staticmethod
+    def _joined_points(points: dict, flags: dict, positions: dict) -> list:
+        """Join the points of the consecutive stations (``{station: (x, y)}``)
+        into one polyline per side of the centerline: ``flags`` is ``{station:
+        (drawn on the left, drawn on the right)}``. Returns up to two
+        polylines of at least two points."""
+        lines = []
+        for side in (0, 1):
+            pts = [
+                (-points[s][0] if side == 0 else points[s][0], points[s][1])
+                for s in sorted(points, key=lambda st: positions[st])
+                if flags.get(s, (False, False))[side]
+            ]
+            if len(pts) > 1:
+                lines.append(pts)
+        return lines
+
+    def keel_body_point(self):
+        """(virtual) The ``(breadth, height)`` point of a body line (as an
+        item of ``body_points``) that is the keel, or None if the hull has no
+        keel line. Its points of the consecutive stations make the keel line
+        of the body plan. (Not to be confused with ``keel_link``, which joins
+        the lowest point of a body line to the centerline.)"""
+        return None
+
+    def rabbet_body_point(self):
+        """(virtual) The ``(breadth, height)`` point of a body line (as an
+        item of ``body_points``) that is the rabbet, or None if the hull has
+        no rabbet line. Its points of the consecutive stations make the rabbet
+        line of the body plan."""
+        return None
     @staticmethod
     def body_plan_sides(placement: str, sides: str = None):
         """The sides to draw: ``sides`` if given, otherwise ``"split"`` for a
@@ -795,12 +838,20 @@ class Model:
                 dxf.text((bx + 1, top - 2), name)
 
     def plot_body_lines(
-        self, dxf: object, lines: dict, labels: bool = True, sheer: bool = True
+        self,
+        dxf: object,
+        lines: dict,
+        labels: bool = True,
+        sheer: bool = True,
+        rabbet: bool = True,
+        keel: bool = True,
     ):
         """Draw the body lines (as returned by ``loft_body_lines``) into
         ``dxf``. With ``labels`` the station name is written above the top end
         of every body line. With ``sheer`` the sheer line is drawn too, see
-        ``body_sheer_polylines``.
+        ``body_sheer_polylines``, with ``rabbet`` the rabbet line, see
+        ``body_rabbet_polylines``, with ``keel`` the keel line, see
+        ``body_keel_polylines``.
         """
         for station, polys in lines.items():
             for poly in polys:
@@ -814,6 +865,12 @@ class Model:
         if sheer:
             for poly in self.body_sheer_polylines(lines):
                 dxf.add_red_polyline(poly)
+        if rabbet:
+            for poly in self.body_rabbet_polylines(lines):
+                dxf.add_red_polyline(poly)
+        if keel:
+            for poly in self.body_keel_polylines(lines):
+                dxf.add_red_polyline(poly)
 
     def body_sheer_polylines(self, lines: dict):
         """The sheer line of a body plan (``lines`` as returned by
@@ -825,6 +882,22 @@ class Model:
         least 2 points.
         """
         return list(getattr(lines, "sheer", ()))
+
+    def body_rabbet_polylines(self, lines: dict):
+        """The rabbet line of a body plan (``lines`` as returned by
+        ``loft_body_lines``): the rabbet points (``rabbet_body_point``) of the
+        consecutive stations joined by a polyline, one per side of the
+        centerline, as ``body_sheer_polylines``. Empty if the model has no
+        rabbet."""
+        return list(getattr(lines, "rabbet", ()))
+
+    def body_keel_polylines(self, lines: dict):
+        """The keel line of a body plan (``lines`` as returned by
+        ``loft_body_lines``): the keel points (``keel_body_point``) of the
+        consecutive stations joined by a polyline, one per side of the
+        centerline, as ``body_sheer_polylines``. Empty if the model has no
+        keel point."""
+        return list(getattr(lines, "keel", ()))
 
     @staticmethod
     def body_polylines(lines: dict):

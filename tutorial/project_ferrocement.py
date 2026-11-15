@@ -116,6 +116,9 @@ class ProjectFerrocement(table_of_offsets.Model):
         ]
         return body_points
 
+    def keel_body_point(self):
+        return ("Breadth Keel", "Height Keel")
+
     def body_lines(
         self,
         placement: str = "max_breadth",

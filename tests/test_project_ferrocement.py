@@ -191,9 +191,10 @@ class Test_ProjectFerrocement(unittest.TestCase):
             self.project.save_body_lines_as(out)
             doc = ezdxf.readfile(out)
             # the default is split: one polyline per station, two for the
-            # midship station, and the sheer line of each side
+            # midship station, and the sheer and keel lines of each side (no
+            # rabbet)
             red = [e for e in doc.modelspace() if e.dxf.layer == "red"]
-            self.assertEqual(14 + 2, len(red))
+            self.assertEqual(14 + 2 + 2, len(red))
 
 
 if __name__ == "__main__":

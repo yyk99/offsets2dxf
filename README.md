@@ -120,18 +120,26 @@ skipped (the line is not extrapolated). `loft_body_lines` returns a
 `BodyLines`, a `dict` `{station: [polyline, ...]}` with the attribute `sheer`
 (`Model.body_sheer_polylines(lines)`).
 
+The rabbet line and the keel line are made the same way from the points
+returned by the overridable `Model.rabbet_body_point()` and
+`Model.keel_body_point()` (a `(breadth, height)` item as in `body_points`;
+`None`, the default, means no such line); `BodyLines.rabbet`, `BodyLines.keel`,
+`Model.body_rabbet_polylines(lines)`, `Model.body_keel_polylines(lines)`. The
+keel line (the keel points of the stations) is not the keel link below.
+
 The lowest point of every body line (the keel) is joined to the centerline by
 a horizontal segment; pass `keel_link=False` to omit it.
 
 `Model.plot_body_lines(dxf, lines)` draws the body lines and writes the
 station name above the top end of every body line (`labels=False` to omit)
-and the sheer line (`sheer=False` to omit).
+and the sheer, rabbet and keel lines (`sheer=False`, `rabbet=False`,
+`keel=False` to omit).
 `Model.plot_body_plan_grid(dxf, lines)` draws the grid of a body plan alone:
 the base line, the waterlines, the centerline `CL` and the buttock lines.
 
 Each tutorial script writes the full drawing, a variant with the body plan to
-the right, a split one and a body-lines-only file (with the grid, the sheer
-line and the keel links).
+the right, a split one and a body-lines-only file (with the grid, the sheer,
+rabbet and keel lines and the keel links).
 
 ## DOCUMENTATION OF THE CODE
 

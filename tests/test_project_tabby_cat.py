@@ -61,6 +61,26 @@ class Test_ProjectTabbyCat(unittest.TestCase):
         (poly,) = lines["1"]
         self.assertNotIn(poly[0], sheer)
 
+    def test_rabbet_line(self):
+        """Breadth Rabbet / Height Rabbet of the 12 stations are joined"""
+        lines = self.project.body_lines("raw", "half")
+        (rabbet,) = self.project.body_rabbet_polylines(lines)
+        self.assertEqual(12, len(rabbet))
+        points = [(round(x / MM), round(y / MM)) for x, y in rabbet]
+        self.assertEqual((40, 900), points[0])  # station 12
+        self.assertEqual((35, 930), points[-1])  # station 1
+        self.assertIn((85, 515), points)  # station 6
+
+    def test_keel_line(self):
+        """Breadth Keel / Height Keel of the 12 stations are joined"""
+        lines = self.project.body_lines("raw", "half")
+        (keel,) = self.project.body_keel_polylines(lines)
+        points = [(round(x / MM), round(y / MM)) for x, y in keel]
+        self.assertEqual(12, len(points))
+        self.assertEqual((40, 850), points[0])  # station 12
+        self.assertEqual((35, 850), points[-1])  # station 1
+        self.assertIn((85, 316), points)  # station 6
+
     def test_body_line_station_6(self):
         (poly,) = self.project.body_lines("raw")["6"]
         points = [(round(x / MM), round(y / MM)) for x, y in poly]

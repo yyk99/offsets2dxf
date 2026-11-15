@@ -105,6 +105,12 @@ class Project89(table_of_offsets.Model):
         """(virtual) we want two horizontal grid lines"""
         return [0, 10 * 12.0]
 
+    def keel_body_point(self):
+        return ("Profile Plan", "Profile")
+
+    def rabbet_body_point(self):
+        return ("Rabbet Plan", "Rabbet")
+
     def body_lines(
         self,
         placement: str = "max_breadth",

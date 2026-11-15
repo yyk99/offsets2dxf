@@ -99,6 +99,12 @@ class ProjectTabbyCat(table_of_offsets.Model):
     def drawing_area_vertical_borders(self):
         return (self._y_plan - 20, 110.0)
 
+    def keel_body_point(self):
+        return ("Breadth Keel", "Height Keel")
+
+    def rabbet_body_point(self):
+        return ("Breadth Rabbet", "Height Rabbet")
+
     def body_points(self):
         """The (breadth, height) points of a body line, without the waterlines
         (``loft_body_lines`` adds them): a string is a table row, a number is

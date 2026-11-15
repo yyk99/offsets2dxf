@@ -251,6 +251,42 @@ class Test_Project89BodyLines(unittest.TestCase):
         l, r = sorted(self.project.body_sheer_polylines(both), key=lambda p: p[0][0])
         self.assertEqual(sorted((-x, y) for x, y in l), sorted(r))
 
+    def test_rabbet_line(self):
+        """the rabbet points of the consecutive stations are joined, one line
+        per side of the centerline"""
+        lines = self.project.body_lines("raw", "split")
+        rabbet = self.project.body_rabbet_polylines(lines)
+        self.assertEqual(2, len(rabbet))
+        point = self.project.rabbet_body_point()
+        expected = []
+        for station, polys in lines.items():
+            rp = self.project.loft_body_line(station, [point], skip_missing=True)
+            for poly in polys:
+                if rp:
+                    expected.append((rp[0][0] if poly[0][0] > 0 else -rp[0][0], rp[0][1]))
+        self.assertEqual(sorted(expected), sorted(rabbet[0] + rabbet[1]))
+        # a model without the rabbet has no rabbet line
+        class NoRabbet(type(self.project)):
+            def rabbet_body_point(self):
+                return None
+
+        self.assertEqual([], NoRabbet().body_rabbet_polylines(NoRabbet().body_lines()))
+
+    def test_keel_line(self):
+        """the keel points of the consecutive stations are joined, one line
+        per side of the centerline"""
+        lines = self.project.body_lines("raw", "split")
+        keel = self.project.body_keel_polylines(lines)
+        self.assertEqual(2, len(keel))
+        point = self.project.keel_body_point()
+        expected = []
+        for station, polys in lines.items():
+            kp = self.project.loft_body_line(station, [point], skip_missing=True)
+            for poly in polys:
+                if kp:
+                    expected.append((kp[0][0] if poly[0][0] > 0 else -kp[0][0], kp[0][1]))
+        self.assertEqual(sorted(expected), sorted(keel[0] + keel[1]))
+
     def test_station_labels(self):
         """every body line has its station name above its top end"""
         with tempfile.TemporaryDirectory() as tmp:
@@ -266,8 +302,13 @@ class Test_Project89BodyLines(unittest.TestCase):
                 if e.dxftype() == "TEXT" and e.dxf.text in lines
             ]
             # a label per body line; the sheer lines have none
-            n_sheer = len(self.project.body_sheer_polylines(self.project.body_lines()))
-            self.assertEqual(len(red) - n_sheer, len(texts))
+            lines = self.project.body_lines()
+            n_extra = (
+                len(self.project.body_sheer_polylines(lines))
+                + len(self.project.body_rabbet_polylines(lines))
+                + len(self.project.body_keel_polylines(lines))
+            )
+            self.assertEqual(len(red) - n_extra, len(texts))
 
             expected = sorted(
                 (station, round(max(p, key=lambda pt: pt[1])[0], 3),
@@ -288,8 +329,8 @@ class Test_Project89BodyLines(unittest.TestCase):
             doc = ezdxf.readfile(out)
             red = [e for e in doc.modelspace() if e.dxf.layer == "red"]
             # one polyline per station, two for the midship station, and the
-            # sheer line of each side
-            self.assertEqual(19 + 2, len(red))
+            # sheer, rabbet and keel lines of each side
+            self.assertEqual(19 + 2 + 2 + 2, len(red))
 
 
 if __name__ == "__main__":

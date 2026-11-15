@@ -130,6 +130,12 @@ class ProjectBlueMoon(table_of_offsets.Model):
 
     # {'LWL to SHEER': 0, 'LWL to DECK EDG': 1, 'BASE TO B-3': 2, 'BASE TO B-2': 3, 'BASE TO B-1': 4, 'RABBET TO BASE': 5, 'KEEL TO BASE': 6, 'CENTERLINE SHAFT': 7, 'BASE TO TOP BAL.': 8, 'SHEER': 9, 'WL 2A': 10, 'WL 1A': 11, 'LWL': 12, 'WL 1B': 13, 'WL 2B': 14, 'RABBET': 15, 'KEEL': 16, 'BALLAST TOP': 17, 'D. UPPER': 18, 'D. LOWER': 19, nan: 20, 'RED-CORRECTED': 21}
 
+    def keel_body_point(self):
+        return ("KEEL", "KEEL TO BASE")
+
+    def rabbet_body_point(self):
+        return ("RABBET", "RABBET TO BASE")
+
     def body_lines(
         self,
         placement: str = "max_breadth",
