@@ -113,11 +113,25 @@ whose half-breadth row is in the table (the row name is the waterline name;
 override `Model.waterline_row(name)` if it differs, e.g. "WL 1" ->
 "Breadth WL 1"). The height is the position of the waterline.
 
+The first of the `body_points` is the sheer. `loft_body_lines` joins the
+sheer points of the consecutive stations into the sheer line, one polyline per
+side of the centerline. A station whose table cell for the sheer is empty is
+skipped (the line is not extrapolated). `loft_body_lines` returns a
+`BodyLines`, a `dict` `{station: [polyline, ...]}` with the attribute `sheer`
+(`Model.body_sheer_polylines(lines)`).
+
+The lowest point of every body line (the keel) is joined to the centerline by
+a horizontal segment; pass `keel_link=False` to omit it.
+
 `Model.plot_body_lines(dxf, lines)` draws the body lines and writes the
-station name above the top end of every body line (`labels=False` to omit).
+station name above the top end of every body line (`labels=False` to omit)
+and the sheer line (`sheer=False` to omit).
+`Model.plot_body_plan_grid(dxf, lines)` draws the grid of a body plan alone:
+the base line, the waterlines, the centerline `CL` and the buttock lines.
 
 Each tutorial script writes the full drawing, a variant with the body plan to
-the right, a split one and a body-lines-only file.
+the right, a split one and a body-lines-only file (with the grid, the sheer
+line and the keel links).
 
 ## DOCUMENTATION OF THE CODE
 
