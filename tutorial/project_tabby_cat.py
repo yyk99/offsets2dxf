@@ -7,7 +7,7 @@ in millimetres (``unit="mm"``); the model works in inches.
 Table layout: stations ``1`` .. ``12``; rows named ``Height ...`` are heights
 above the baseline (Sheer, Buttock 1-4, Rabbet, Keel), rows named
 ``Breadth ...`` are half-breadths from the centerline (Sheer, WL I-VIII,
-Rabbet). The cells marked "-" in the source are empty. The diagonals are not
+Rabbet, Keel; the last one is assumed by the designer). The cells marked "-" in the source are empty. The diagonals are not
 drawn.
 
 Known about the hull (not in the table; confirmed):
@@ -106,7 +106,7 @@ class ProjectTabbyCat(table_of_offsets.Model):
         body_points = [
             ("Breadth Sheer", "Height Sheer"),
             ("Breadth Rabbet", "Height Rabbet"),
-            (0.0, "Height Keel"),
+            ("Breadth Keel", "Height Keel"),
         ]
         # the waterlines are added by loft_body_lines (waterlines_positions)
         body_points += [
@@ -174,7 +174,7 @@ class ProjectTabbyCat(table_of_offsets.Model):
 
             # plan view
             for name in (
-                ["Breadth Rabbet"]
+                ["Breadth Keel", "Breadth Rabbet"]
                 + ["Breadth WL " + r for r in ROMAN]
                 + ["Breadth Sheer"]
             ):

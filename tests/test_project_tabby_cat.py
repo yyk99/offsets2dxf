@@ -52,11 +52,11 @@ class Test_ProjectTabbyCat(unittest.TestCase):
         (poly,) = self.project.body_lines("raw")["6"]
         points = [(round(x / MM), round(y / MM)) for x, y in poly]
         # sheer, 8 waterlines, 4 buttocks, the rabbet (breadth 85 mm) and the
-        # keel (316 mm: a straight line between the stations 5 and 10); both
-        # are dashes in the source
+        # keel (316 mm: a straight line between the stations 5 and 10); the
+        # dashes of the source
         self.assertEqual(1 + 8 + 4 + 2, len(points))
         self.assertIn((85, 515), points)
-        self.assertIn((0, 316), points)
+        self.assertIn((85, 316), points)  # Breadth Keel, Height Keel
         self.assertEqual((1435, 1715), points[0])
         self.assertIn((1245, 1000), points)  # DWL
         for breadth, height in [(300, 578), (600, 670), (900, 785), (1200, 956)]:
