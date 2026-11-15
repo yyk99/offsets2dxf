@@ -67,8 +67,9 @@ class Test_ProjectFerrocement(unittest.TestCase):
     def test_body_lines_with_waterlines(self):
         """the waterlines are in the list of the body line points"""
         (poly,) = self.project.body_lines("raw")["6"]
-        # sheer, deck, knuckle, keel, 3 buttocks and 8 waterlines
-        self.assertEqual(4 + 3 + 8, len(poly))
+        # sheer, deck, knuckle, keel, 3 buttocks and 8 waterlines, and the
+        # link from the keel to the centerline
+        self.assertEqual(4 + 3 + 8 + 1, len(poly))
         # WL 5 at station 6: breadth 1480 mm at the draught
         self.assertIn(
             (round(1480 * MM, 6), round(1800 * MM, 6)),

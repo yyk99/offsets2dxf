@@ -54,7 +54,9 @@ class Test_ProjectTabbyCat(unittest.TestCase):
         # sheer, 8 waterlines, 4 buttocks, the rabbet (breadth 85 mm) and the
         # keel (316 mm: a straight line between the stations 5 and 10); the
         # dashes of the source
-        self.assertEqual(1 + 8 + 4 + 2, len(points))
+        # and the horizontal link from the keel to the centerline
+        self.assertEqual(1 + 8 + 4 + 2 + 1, len(points))
+        self.assertEqual((0, 316), points[-1])
         self.assertIn((85, 515), points)
         self.assertIn((85, 316), points)  # Breadth Keel, Height Keel
         self.assertEqual((1435, 1715), points[0])

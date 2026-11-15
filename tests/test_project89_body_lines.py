@@ -26,7 +26,9 @@ class Test_Project89BodyLines(unittest.TestCase):
             (poly,) = polys
             heights = [y for _, y in poly]
             self.assertEqual(sorted(heights, reverse=True), heights, station)
-        self.assertEqual(13, len(lines["18"][0]))
+        # 13 points and the horizontal link from the keel to the centerline
+        self.assertEqual(14, len(lines["18"][0]))
+        self.assertEqual(self.project.body_plan_centerline_x, lines["18"][0][-1][0])
 
     def test_default_sides(self):
         model = table_of_offsets.Model
@@ -81,7 +83,8 @@ class Test_Project89BodyLines(unittest.TestCase):
         both = self.project.body_lines("raw", "both")
         (poly,) = both["18"]
         (half,) = raw["18"]
-        self.assertEqual(2 * len(half), len(poly))
+        # the keel point on the centerline is shared by the two halves
+        self.assertEqual(2 * len(half) - 1, len(poly))
         self.assertEqual(half[0], poly[0])
         self.assertEqual((-half[0][0], half[0][1]), poly[-1])
 

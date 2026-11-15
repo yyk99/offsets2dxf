@@ -246,7 +246,11 @@ class Test_WaterlineBodyPoints(unittest.TestCase):
         self.assertIn((45.75, 0.0), lines["18"][0])
         # WL + 6" at station 18: breadth 4-1-1
         self.assertIn((49.125, 6.0), lines["18"][0])
-        self.assertEqual(2, len(lines["18"][0]))
+        # and the link from the lowest point to the centerline
+        self.assertEqual(3, len(lines["18"][0]))
+        self.assertEqual((0.0, 0.0), lines["18"][0][-1])
+        no_link = self.model.loft_body_lines([], "raw", keel_link=False)
+        self.assertEqual(2, len(no_link["18"][0]))
         # no point at the stations where the cells are empty
         self.assertEqual([], lines["33"])
 

@@ -571,6 +571,7 @@ class Model:
         gap: float = 24.0,
         sides: str = None,
         bow_station: str = None,
+        keel_link: bool = True,
     ):
         """Return ``{station: [polyline, ...]}``: the body lines of every station.
 
@@ -596,6 +597,10 @@ class Model:
           is the end with the greater x in ``station_positions``.
 
         ``bow_station`` - overrides ``set_bow_station`` for this call.
+
+        ``keel_link`` - join the lowest point of every body line (the keel) to
+        the centerline with a horizontal segment (a point (0, y) is appended
+        unless the lowest point is already on the centerline).
 
         ``placement`` - where the centerline of the body plan is put along x
         (heights are the same as in the profile view, so y is not changed):
@@ -628,6 +633,8 @@ class Model:
         for station in positions:
             poly = self.loft_body_line(station, body_points, skip_missing=True)
             poly.sort(key=lambda pt: -pt[1])
+            if keel_link and poly and poly[-1][0] != 0:
+                poly.append((0.0, poly[-1][1]))
             halves[station] = poly
 
         widest = None
