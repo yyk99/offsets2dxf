@@ -39,4 +39,4 @@ Tutorial scripts (e.g. `tutorial/project89.py`) are run directly and write `.dxf
 
 ## Data
 
-`sample_data/` holds the primary CSV and `a_ferrocement_hull/` (a table in millimetres transcribed from an FAO drawing, with the source images; see `tutorial/project_ferrocement.py`). `sample_data_too/` is a git submodule (`git@github.com:yyk99/tables_of_offsets.git`) with more tables (`offset_table_181.csv`, `offset_table_blue_moon.csv`). Run `git submodule update --init` to fetch it.
+`sample_data/` holds the primary CSV and `a_ferrocement_hull/` (a table in millimetres transcribed from an FAO drawing, with the source images; see `tutorial/project_ferrocement.py`) and `tabby_cat/` (a table in millimetres transcribed from a lines plan picture; waterline heights given by the user, buttocks 300 mm and stations 510 mm apart, confirmed by the user; see `tutorial/project_tabby_cat.py`). `sample_data_too/` is a git submodule (`git@github.com:yyk99/tables_of_offsets.git`) with more tables (`offset_table_181.csv`, `offset_table_blue_moon.csv`). Run `git submodule update --init` to fetch it.
