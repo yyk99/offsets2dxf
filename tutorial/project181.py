@@ -1,7 +1,13 @@
 """Project 181: model for sample_data_too/offset_table_181.csv.
 
-Run: ``python3 project181.py [--out-dir DIR] [--output-units UNIT]`` -> writes a .dxf into ./out (in
-the current directory) or DIR.
+Heights (Sheer, the buttocks, Rabbet, Profile) are measured from the DWL, positive up. Half-breadths
+are the "Sheerline", "... LL", "... DL" and "Rabbet Line" rows. The diagonals D1-D3 are given
+(``diagonals_positions``, heights above the DWL). The keel is not in the body lines: the table
+has no half-breadth for the Profile.
+
+Run: ``python3 project181.py [--out-dir DIR] [--output-units UNIT]`` -> writes, into ./out (in the
+current directory) or DIR, test_project181.dxf (everything, body lines in the middle of the profile
+view) and test_project181_body.dxf (body lines only).
 """
 
 import context
@@ -31,6 +37,7 @@ class Project181(table_of_offsets.Model):
             }
         )
         # fmt: on
+        self.set_bow_station("FP")  # the stem; the stern (AP) is at x = 0
         self._y0 = 0.0
         self._y1 = -100.0
         pass
@@ -58,6 +65,7 @@ class Project181(table_of_offsets.Model):
             "DWL": 0.0,
             '8" DL': -8,
             '16" DL': -16.0,
+            '24" DL': -24.0,
         }
 
     def buttocks_positions(self):
@@ -81,10 +89,67 @@ class Project181(table_of_offsets.Model):
             return self._y1
         return self._y0
 
+    def drawing_area_vertical_borders(self):
+        """The station lines run down below the diagonals of the plan view
+        (the lowest, D3, is at about -142)"""
+        return (-150.0, 120.0)
+
     def grid_y_origins(self):
         return [self._y0, self._y1]
 
+    def diagonals_positions(self):
+        """{name: (y0, x1, y1)}, inches above the DWL: the line from (0, y0)
+        through (x1, y1). Given: D1 from (0, 0) through (24, -24), D2 from
+        (0, 16) through (24, -8) and D3 from (0, 24) through (36, 8)."""
+        return {
+            "D1": (0.0, 24.0, -24.0),
+            "D2": (16.0, 24.0, -8.0),
+            "D3": (24.0, 36.0, 8.0),
+        }
+
+    def diagonal_extension(self):
+        """The diagonals reach 6" beyond the farthest hull point"""
+        return 6.0
+
+    def rabbet_body_point(self):
+        return ("Rabbet Line", "Rabbet")
+
+    def body_lines(
+        self,
+        placement: str = "max_breadth",
+        sides: str = None,
+        bow_station: str = None,
+    ):
+        """Return {station: polyline} with the body plan line of every station.
+
+        Points are (half-breadth, height above the DWL) in inches.
+        """
+        # (breadth, height): a string is a table row, a number is inches
+        body_points = [
+            ("Sheerline", "Sheer"),
+            ("Rabbet Line", "Rabbet"),
+            # the waterlines are added by loft_body_lines (waterlines_positions)
+            # buttocks: height from the table, breadth is the buttock
+            (36.0, '36" Buttock'),
+            (24.0, '24" Buttock'),
+            (12.0, '12" Buttock'),
+        ]
+        return self.loft_body_lines(
+            body_points, placement, sides=sides, bow_station=bow_station
+        )
+
+    def save_body_lines_as(
+        self, filename_dxf: str, placement: str = "max_breadth", sides: str = None
+    ):
+        """Save the body lines and their grid (base line, centerline,
+        waterlines, buttocks); no plan/profile lines"""
+        with self.open_dxf(filename_dxf) as dxf:
+            lines = self.body_lines(placement, sides)
+            self.plot_body_plan_grid(dxf, lines)
+            self.plot_body_lines(dxf, lines)
+
     def save_model_as(self, filename_dxf: str):
+        body_lines = self.body_lines()
         with self.open_dxf(filename_dxf) as dxf:
             self.plot_grid(dxf)
 
@@ -99,6 +164,11 @@ class Project181(table_of_offsets.Model):
             for n in range(7, 13):
                 dxf.add_red_polyline(self.loft_line_n_sorted(n))
 
+            # the diagonals in the plan view, below the plan centerline
+            self.plot_diagonal_plan_lines(dxf)
+
+            self.plot_body_lines(dxf, body_lines)
+
 
 if __name__ == "__main__":
     args = table_of_offsets.parse_script_args(description=__doc__)
@@ -110,6 +180,10 @@ if __name__ == "__main__":
 
     filename = os.path.join(out_dir, "test_project181.dxf")
     proj.save_model_as(filename)
+    print("Saved as:", filename)
+
+    filename = os.path.join(out_dir, "test_project181_body.dxf")
+    proj.save_body_lines_as(filename)
     print("Saved as:", filename)
 
 # end of file
