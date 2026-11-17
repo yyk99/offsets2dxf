@@ -95,6 +95,9 @@ class Project181(table_of_offsets.Model):
             dxf.add_red_polyline(self.loft_line_n_sorted(4))
             #
             dxf.add_red_polyline(self.loft_line_n_sorted(6))
+            # waterlines: 24" LL, 16" LL, 8" LL, DWL, 8" DL, 16" DL
+            for n in range(7, 13):
+                dxf.add_red_polyline(self.loft_line_n_sorted(n))
 
 
 if __name__ == "__main__":
