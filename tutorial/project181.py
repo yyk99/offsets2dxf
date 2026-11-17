@@ -8,8 +8,8 @@ has no half-breadth for the Profile.
 Run: ``python3 project181.py [--out-dir DIR] [--output-units UNIT]`` -> writes, into ./out (in the
 current directory) or DIR, test_project181.dxf (everything, body lines in the middle of the profile
 view) and test_project181_body.dxf (body lines only) and
-test_project181_station1.dxf and test_project181_station8.dxf (the body line of the station
-with every point labelled).
+test_project181_station1.dxf, _station4.dxf, _station5.dxf and _station8.dxf (the body line
+of the station with every point labelled).
 """
 
 import context
@@ -200,7 +200,7 @@ if __name__ == "__main__":
     print("Saved as:", filename)
 
     # one station, every point labelled with the source of its coordinates
-    for station in ("1", "8"):
+    for station in ("1", "4", "5", "8"):
         filename = os.path.join(out_dir, "test_project181_station%s.dxf" % station)
         proj.save_station_as(filename, station)
         print("Saved as:", filename)
