@@ -580,6 +580,7 @@ class Model:
         station_id: str,
         body_points: list,
         text_height: float = 2.0,
+        point_text_height: float = None,
     ):
         """Draw the body line of one station for checking the data: the
         polyline, its centerline, and next to every point a label
@@ -590,7 +591,12 @@ class Model:
         The base line (y = 0) and the waterlines (``waterlines_positions``) are
         drawn as horizontal lines with their names on the left, the buttocks
         (``buttocks_positions``) as vertical lines with their names on the top.
+
+        ``text_height`` is the height of the labels of the grid, ``point_text_height``
+        (default ``text_height``) of the labels of the points.
         """
+        if point_text_height is None:
+            point_text_height = text_height
         points = self.loft_body_line_sources(station_id, body_points)
         if not points:
             return
@@ -637,7 +643,7 @@ class Model:
             dxf.text(
                 (x + 1, y + 0.5),
                 "%d (%s, %s)" % (n, source(breadth_src), source(height_src)),
-                height=text_height,
+                height=point_text_height,
             )
 
     BODY_PLACEMENTS = ("raw", "max_breadth", "right")
