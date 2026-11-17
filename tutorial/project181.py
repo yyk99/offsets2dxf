@@ -7,7 +7,9 @@ has no half-breadth for the Profile.
 
 Run: ``python3 project181.py [--out-dir DIR] [--output-units UNIT]`` -> writes, into ./out (in the
 current directory) or DIR, test_project181.dxf (everything, body lines in the middle of the profile
-view) and test_project181_body.dxf (body lines only).
+view) and test_project181_body.dxf (body lines only) and
+test_project181_station1.dxf and test_project181_station8.dxf (the body line of the station
+with every point labelled).
 """
 
 import context
@@ -32,7 +34,7 @@ class Project181(table_of_offsets.Model):
                 '36" Buttock': [ "5" ],
                 '24" Buttock': [ "3", "4", "5", "6", "7" ],
                 '12" Buttock': [ "2", "3", "4", "5", "6", "7" ],
-                'Rabbet': [ "1", "2", "3", "4", "5", "6", "7" ],
+                'Rabbet': [ "1", "2", "3", "4", "5", "6", "7", "8" ],
                 'Profile': [ "1", "2", "3", "4", "5", "6", "7" ],
             }
         )
@@ -114,6 +116,19 @@ class Project181(table_of_offsets.Model):
     def rabbet_body_point(self):
         return ("Rabbet Line", "Rabbet")
 
+    def body_points(self):
+        """The (breadth, height) points of a body line, without the waterlines
+        and the diagonals (``loft_body_lines`` adds them): a string is a table
+        row, a number is inches."""
+        return [
+            ("Sheerline", "Sheer"),
+            ("Rabbet Line", "Rabbet"),
+            # buttocks: height from the table, breadth is the buttock
+            (36.0, '36" Buttock'),
+            (24.0, '24" Buttock'),
+            (12.0, '12" Buttock'),
+        ]
+
     def body_lines(
         self,
         placement: str = "max_breadth",
@@ -124,19 +139,17 @@ class Project181(table_of_offsets.Model):
 
         Points are (half-breadth, height above the DWL) in inches.
         """
-        # (breadth, height): a string is a table row, a number is inches
-        body_points = [
-            ("Sheerline", "Sheer"),
-            ("Rabbet Line", "Rabbet"),
-            # the waterlines are added by loft_body_lines (waterlines_positions)
-            # buttocks: height from the table, breadth is the buttock
-            (36.0, '36" Buttock'),
-            (24.0, '24" Buttock'),
-            (12.0, '12" Buttock'),
-        ]
         return self.loft_body_lines(
-            body_points, placement, sides=sides, bow_station=bow_station
+            self.body_points(), placement, sides=sides, bow_station=bow_station
         )
+
+    def save_station_as(self, filename_dxf: str, station: str = "1"):
+        """Save the body line of one station for checking the data: every point
+        is labelled with the table rows its coordinates come from."""
+        with self.open_dxf(filename_dxf) as dxf:
+            self.plot_annotated_body_line(
+                dxf, station, self.body_points(), point_text_height=1.0
+            )
 
     def save_body_lines_as(
         self, filename_dxf: str, placement: str = "max_breadth", sides: str = None
@@ -185,5 +198,11 @@ if __name__ == "__main__":
     filename = os.path.join(out_dir, "test_project181_body.dxf")
     proj.save_body_lines_as(filename)
     print("Saved as:", filename)
+
+    # one station, every point labelled with the source of its coordinates
+    for station in ("1", "8"):
+        filename = os.path.join(out_dir, "test_project181_station%s.dxf" % station)
+        proj.save_station_as(filename, station)
+        print("Saved as:", filename)
 
 # end of file
