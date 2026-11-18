@@ -20,13 +20,33 @@ class Test_Project89BodyLines(unittest.TestCase):
         self.project = Project89()
 
     def test_body_lines_per_station(self):
-        lines = self.project.body_lines()
+        lines = self.project.body_lines("max_breadth", "half")
         self.assertEqual(18, len(lines))
         for station, polys in lines.items():
             (poly,) = polys
             heights = [y for _, y in poly]
             self.assertEqual(sorted(heights, reverse=True), heights, station)
         self.assertEqual(13, len(lines["18"][0]))
+
+    def test_default_sides(self):
+        model = table_of_offsets.Model
+        # in the middle of the profile view: split; otherwise: half
+        self.assertEqual("split", model.body_plan_sides("max_breadth"))
+        self.assertEqual("half", model.body_plan_sides("right"))
+        self.assertEqual("half", model.body_plan_sides("raw"))
+        self.assertEqual("both", model.body_plan_sides("max_breadth", "both"))
+
+        default = self.project.body_lines()
+        self.assertEqual(default, self.project.body_lines("max_breadth", "split"))
+        # the midship station is drawn on both sides, the others on one
+        counts = sorted(len(p) for p in default.values())
+        self.assertEqual([1] * 17 + [2], counts)
+        self.assertEqual(
+            self.project.body_lines("right", "half"), self.project.body_lines("right")
+        )
+        self.assertEqual(
+            self.project.body_lines("raw", "half"), self.project.body_lines("raw")
+        )
 
     def test_station_18_points(self):
         (poly,) = self.project.body_lines("raw")["18"]
@@ -40,7 +60,7 @@ class Test_Project89BodyLines(unittest.TestCase):
         widest = max(raw, key=lambda s: max(x for x, _ in raw[s][0]))
         positions = self.project.station_positions()
 
-        mid = self.project.body_lines()  # default: max_breadth
+        mid = self.project.body_lines("max_breadth", "half")
         self.assertEqual(
             raw[widest][0][0][0] + positions[widest], mid[widest][0][0][0]
         )
@@ -174,13 +194,37 @@ class Test_Project89BodyLines(unittest.TestCase):
             texts = [e.dxf.text for e in doc.modelspace() if e.dxftype() == "TEXT"]
             self.assertNotIn("CL", texts)
 
-    def test_generate_dxf(self):
+    def test_station_labels(self):
+        """every body line has its station name above its top end"""
         with tempfile.TemporaryDirectory() as tmp:
-            out = os.path.join(tmp, "project89_body.dxf")
+            out = os.path.join(tmp, "p89_body.dxf")
             self.project.save_body_lines_as(out)
             doc = ezdxf.readfile(out)
             red = [e for e in doc.modelspace() if e.dxf.layer == "red"]
-            self.assertEqual(18, len(red))
+            texts = [e for e in doc.modelspace() if e.dxftype() == "TEXT"]
+            self.assertEqual(len(red), len(texts))
+
+            lines = self.project.body_lines()
+            expected = sorted(
+                (station, round(max(p, key=lambda pt: pt[1])[0], 3),
+                 round(max(p, key=lambda pt: pt[1])[1] + 1, 3))
+                for station, polys in lines.items()
+                for p in polys
+            )
+            actual = sorted(
+                (e.dxf.text, round(e.dxf.align_point.x, 3), round(e.dxf.align_point.y, 3))
+                for e in texts
+            )
+            self.assertEqual(expected, actual)
+
+    def test_generate_dxf(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "project89_body.dxf")
+            self.project.save_body_lines_as(out)  # the default: split
+            doc = ezdxf.readfile(out)
+            red = [e for e in doc.modelspace() if e.dxf.layer == "red"]
+            # one polyline per station, two for the midship station
+            self.assertEqual(19, len(red))
 
 
 if __name__ == "__main__":

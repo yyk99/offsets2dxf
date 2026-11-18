@@ -28,12 +28,19 @@ In Visual Studio Code
 
 ## USAGE
 
-Run a project script from the `tutorial/` directory; it writes a `.dxf` file
-into the current directory:
+The coordinates in the `.dxf` files are in the unit of the table of offsets
+(inches for the feet-inches-eighths tables, millimetres for the ferrocement
+hull); `--output-units inch|ft|mm|cm|m` (or `Model.set_output_unit`) chooses
+another one. The unit is also stored in the file. The program itself works in
+inches.
+
+Run a project script; it writes its `.dxf` files into `./out` in the current
+directory (git-ignored, created if needed). Use `--out-dir DIR` to write
+somewhere else (a relative `DIR` is relative to the current directory):
 
     cd tutorial
-    python3 projectbluemoon.py      # -> test_project_blue_moon.dxf (+ _body.dxf)
-    python3 project89.py
+    python3 projectbluemoon.py      # -> tutorial/out/test_project_blue_moon*.dxf
+    python3 project89.py --out-dir /tmp/dxf
 
 Run the tests:
 
@@ -55,6 +62,12 @@ A CSV file. The first column (header `#`) holds line names (`Sheer`, `B 3'`,
 - `1-10-2` = 1 ft 10 in 2/8 in = 22.25 in; `0-1` = 1 in; `1` = 12 in
 - a trailing `+` / `-` adds / subtracts 1/16 in: `0-0-1+` = 0.1875 in
 - all lengths inside the program are inches
+- a table in another unit (plain numbers, e.g. millimetres, empty cell for a
+  dash) is read with the `unit` option: `Model(csv, unit="mm")`. Units:
+  `"ftin"` (default, feet-inches-eighths), `"inch"`, `"ft"`, `"mm"`, `"cm"`,
+  `"m"`. The table is kept as it is in the source; the values are converted
+  to inches when they are read. See
+  `tutorial/project_ferrocement.py` (`sample_data/a_ferrocement_hull/`).
 
 ## ADDING A NEW BOAT
 
@@ -78,18 +91,30 @@ A CSV file. The first column (header `#`) holds line names (`Sheer`, `B 3'`,
   station with the greatest breadth, in the middle of the profile view;
   `"right"` - to the right of the profile view, clear of it;
   `"raw"` - no shift.
-- `sides="half"` (default) - the half-breadth only; `"both"` - both halves of
-  every station; `"split"` - the usual body plan, aft stations to the left and
+- `sides` - `"half"`: the half-breadth only; `"both"`: both halves of
+  every station; `"split"`: the usual body plan, aft stations to the left and
   forward stations to the right of the centerline. The bow end is given by
   `Model.set_bow_station("<station>")` (or the `bow_station` argument); if it
-  is not set, the bow is the end with the greater x. Both tutorial projects set
+  is not set, the bow is the end with the greater x. The tutorial projects set
   it in `__init__`.
+  The default is `"split"` for a body plan in the middle of the profile view
+  (`placement="max_breadth"`) and `"half"` otherwise (`Model.body_plan_sides`);
+  pass `sides` to choose another one.
 
 With `placement="right"` the base line and the waterlines of the profile view
 are extended through the body plan, and its vertical centerline and its buttock
 lines (`buttocks_positions`, to the right of the centerline for
 `sides="half"`, on both sides otherwise) are drawn
 (`Model.body_plan_grid_options`, `Model.plot_grid`).
+
+The waterlines are always part of the body lines when the table has them:
+`loft_body_lines` adds a point for every waterline of `waterlines_positions()`
+whose half-breadth row is in the table (the row name is the waterline name;
+override `Model.waterline_row(name)` if it differs, e.g. "WL 1" ->
+"Breadth WL 1"). The height is the position of the waterline.
+
+`Model.plot_body_lines(dxf, lines)` draws the body lines and writes the
+station name above the top end of every body line (`labels=False` to omit).
 
 Each tutorial script writes the full drawing, a variant with the body plan to
 the right, a split one and a body-lines-only file.

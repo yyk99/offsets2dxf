@@ -1,6 +1,7 @@
 """Project 181: model for sample_data_too/offset_table_181.csv.
 
-Run: ``python3 project181.py`` -> writes a .dxf into the current directory.
+Run: ``python3 project181.py [--out-dir DIR] [--output-units UNIT]`` -> writes a .dxf into ./out (in
+the current directory) or DIR.
 """
 
 import context
@@ -84,7 +85,7 @@ class Project181(table_of_offsets.Model):
         return [self._y0, self._y1]
 
     def save_model_as(self, filename_dxf: str):
-        with table_of_offsets.DXF("test_project181.dxf") as dxf:
+        with self.open_dxf(filename_dxf) as dxf:
             self.plot_grid(dxf)
 
             dxf.add_red_polyline(self.loft_line_n_sorted(0))
@@ -97,11 +98,15 @@ class Project181(table_of_offsets.Model):
 
 
 if __name__ == "__main__":
+    args = table_of_offsets.parse_script_args(description=__doc__)
+    out_dir = args.out_dir
     proj = Project181()
+    proj.set_output_unit(args.output_units)
 
     print(proj.station_positions())
 
-    proj.save_model_as("test_project181.dxf")
-    print("Saved as:", os.path.abspath("test_project181.dxf"))
+    filename = os.path.join(out_dir, "test_project181.dxf")
+    proj.save_model_as(filename)
+    print("Saved as:", filename)
 
 # end of file

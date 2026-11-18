@@ -5,10 +5,13 @@ A table of offsets is a CSV file:
 - the first column (header ``#``) holds the line names, one per row
   (e.g. ``Sheer``, ``B 3'``, ``LWL``);
 - the other columns are stations (e.g. ``33``, ``32`` ... ``0``, or ``TRAN.``);
-- a cell holds an offset in feet-inches-eighths, e.g. ``1-10-2``
-  (see ``TableOfOffsets.offset2double``); an empty cell means "no point".
+- a cell holds an offset, by default in feet-inches-eighths, e.g. ``1-10-2``
+  (see ``TableOfOffsets.offset2double``), or a plain number in the unit given
+  to ``Model`` (``unit="mm"``, see ``TableOfOffsets.UNITS``); an empty cell
+  means "no point".
 
-All lengths in this module are in inches (see ``Model.units``).
+All lengths inside this module are in inches (see ``Model.units``), whatever
+the unit of the table.
 
 Classes:
 
@@ -18,14 +21,59 @@ Classes:
 - ``DXF`` - thin context-manager wrapper around ``ezdxf`` that saves the file.
 """
 
+import argparse
+import os
+
 import ezdxf
 import ezdxf.entities
+import ezdxf.units
 import ezdxf.enums
 import numpy
 import pandas
 import math
 
 __version__ = "0.5.0"
+
+# the .dxf files written by the scripts go here by default: ./out in the
+# current directory (git-ignored)
+DEFAULT_OUT_DIR = "out"
+
+
+def parse_script_args(argv: list = None, description: str = None):
+    """Parse the command line of a script:
+    ``[--out-dir DIR] [--output-units UNIT]``.
+
+    Returns the namespace with:
+
+    - ``out_dir`` - the absolute path of the directory for the output files:
+      ``out`` in the current directory if not given (``DEFAULT_OUT_DIR``); a
+      relative ``DIR`` is also relative to the current directory. The
+      directory is created when a file is saved (see ``DXF.close``);
+    - ``output_units`` - the unit of the coordinates in the .dxf files
+      (``inch``, ``ft``, ``mm``, ``cm`` or ``m``), None if not given: the unit
+      of the table is used (see ``Model.set_output_unit``).
+    """
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument(
+        "--out-dir",
+        default=DEFAULT_OUT_DIR,
+        help="directory for the .dxf files (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--output-units",
+        choices=OUTPUT_UNITS,
+        default=None,
+        help="unit of the coordinates in the .dxf files "
+        "(default: the unit of the table of offsets)",
+    )
+    args = parser.parse_args(argv)
+    args.out_dir = os.path.abspath(args.out_dir)
+    return args
+
+
+def output_dir_from_args(argv: list = None, description: str = None) -> str:
+    """The ``out_dir`` of ``parse_script_args``."""
+    return parse_script_args(argv, description).out_dir
 
 
 class TableOfOffsets:
@@ -72,6 +120,39 @@ class TableOfOffsets:
         return d + delta
 
 
+# Units of the offsets in a table: the number of inches in one unit.
+# "ftin" is the special feet-inches-eighths notation, see offset2double.
+TableOfOffsets.UNITS = {
+    "ftin": None,
+    "inch": 1.0,
+    "ft": 12.0,
+    "mm": 1.0 / 25.4,
+    "cm": 1.0 / 2.54,
+    "m": 1000.0 / 25.4,
+}
+
+
+# Units of the coordinates in a .dxf file: the unit of the table, except "ftin".
+OUTPUT_UNITS = ("inch", "ft", "mm", "cm", "m")
+
+
+def offset_to_inches(value: str, unit: str = "ftin") -> float:
+    """Convert an offset from a table cell to inches.
+
+    unit - one of ``TableOfOffsets.UNITS``: ``"ftin"`` (default) is the
+    ``feet-inches-eighths`` notation, the others are plain numbers, e.g.
+    ``offset_to_inches("1290", "mm")`` -> 50.79...
+    Raises ValueError for an unknown unit or a malformed value.
+    """
+    if unit not in TableOfOffsets.UNITS:
+        raise ValueError(
+            "unknown unit %r, expected one of %s" % (unit, list(TableOfOffsets.UNITS))
+        )
+    if unit == "ftin":
+        return TableOfOffsets.offset2double(value)
+    return float(value) * TableOfOffsets.UNITS[unit]
+
+
 class Model:
     """A boat's table of offsets (loaded from CSV) and the geometry lofted from it.
 
@@ -97,13 +178,28 @@ class Model:
             dxf.add_red_polyline(boat.loft_line_n(0))
     """
 
-    def __init__(self: object, _filename_csv: str):
+    def __init__(self: object, _filename_csv: str, unit: str = "ftin"):
+        """Load the table of offsets from ``_filename_csv``.
+
+        unit - the unit of the offsets in the table, one of
+        ``TableOfOffsets.UNITS``: ``"ftin"`` (default, feet-inches-eighths),
+        ``"inch"``, ``"ft"``, ``"mm"``, ``"cm"`` or ``"m"``. Everything the
+        model returns is in inches.
+        """
+        if unit not in TableOfOffsets.UNITS:
+            raise ValueError(
+                "unknown unit %r, expected one of %s"
+                % (unit, list(TableOfOffsets.UNITS))
+            )
+        self._unit = unit
         self._filename_csv = _filename_csv
-        self._too = pandas.read_csv(self._filename_csv)
+        # read the cells as text: the numbers are converted by offset_to_inches
+        self._too = pandas.read_csv(self._filename_csv, dtype=str)
         self._under_waterline = {}
         # x of the centerline of the body plan lofted last (loft_body_lines)
         self.body_plan_centerline_x = None
         self._bow_station = None
+        self._output_unit = None
         pass
 
     def set_bow_station(self, station: str):
@@ -129,6 +225,36 @@ class Model:
     def units(self):
         """Name of the length unit used for all returned values."""
         return "inch"
+
+    def offsets_unit(self):
+        """The unit of the offsets in the CSV table (the ``unit`` argument)."""
+        return self._unit
+
+    def offset_to_inches(self, value: str) -> float:
+        """Convert a cell of the table to inches, using the unit of the table."""
+        return offset_to_inches(value, self._unit)
+
+    def set_output_unit(self, unit: str = None):
+        """Set the unit of the coordinates in the .dxf files (``OUTPUT_UNITS``).
+        None (the default) means the unit of the table (``"inch"`` for the
+        feet-inches-eighths tables)."""
+        if unit is not None and unit not in OUTPUT_UNITS:
+            raise ValueError(
+                "unknown output unit %r, expected one of %s" % (unit, OUTPUT_UNITS)
+            )
+        self._output_unit = unit
+
+    def output_unit(self) -> str:
+        """The unit of the coordinates in the .dxf files: the one set by
+        ``set_output_unit``, else the unit of the table."""
+        if self._output_unit is not None:
+            return self._output_unit
+        return "inch" if self._unit == "ftin" else self._unit
+
+    def open_dxf(self, filename_dxf: str):
+        """A ``DXF`` to write ``filename_dxf`` in the output unit. The model
+        itself works in inches; the coordinates are converted when drawn."""
+        return DXF(filename_dxf, unit=self.output_unit())
 
     def station_positions(self):
         """(virtual) Return ``{station_name: x_position}`` for every station column.
@@ -195,7 +321,7 @@ class Model:
                 s = self.offset_sign(pos, line_name)
                 off = self.base_offset(line_name)
                 poly_line.append(
-                    (stations[pos], s * TableOfOffsets.offset2double(offset) + off)
+                    (stations[pos], s * self.offset_to_inches(offset) + off)
                 )
 
         return poly_line
@@ -315,8 +441,20 @@ class Model:
             instead of raising ValueError
         Points are (half-breadth, height).
         """
+        return [
+            (x, y)
+            for x, y, _, _ in self._body_point_sources(
+                station_id, body_points, skip_missing
+            )
+        ]
 
-        poly = []
+    def _body_point_sources(
+        self, station_id: str, body_points: list, skip_missing: bool
+    ) -> list:
+        """The points of ``loft_body_line`` with their sources:
+        ``[(x, y, breadth_source, height_source)]``, a source is the name of the
+        table row or the number (inches) the coordinate comes from."""
+        points = []
 
         for pp in body_points:
             if type(pp) is tuple:
@@ -336,9 +474,92 @@ class Model:
                 if not skip_missing:
                     raise
                 continue
-            poly.append((x, y))
+            points.append((x, y, breadth_line, height_line))
 
-        return poly
+        return points
+
+    def loft_body_line_sources(self, station_id: str, body_points: list) -> list:
+        """The body line of one station (no shift, half-breadth only) with the
+        source of every coordinate: ``[(x, y, breadth_source, height_source)]``,
+        from the top down. The points are those of ``loft_body_lines``: the
+        ``body_points`` and the waterlines that are in the table. A source is
+        the name of the table row or the number (inches) of the point.
+        """
+        points = self._body_point_sources(
+            station_id, list(body_points) + self.waterline_body_points(), True
+        )
+        points.sort(key=lambda pt: -pt[1])
+        return points
+
+    def format_length(self, inches: float) -> str:
+        """A length for a label, in the unit of the table (inches for the
+        feet-inches-eighths tables), e.g. ``"500 mm"``."""
+        factor = TableOfOffsets.UNITS[self._unit]
+        if factor is None:
+            return "%g in" % round(inches, 3)
+        return "%g %s" % (round(inches / factor, 3), self._unit)
+
+    def plot_annotated_body_line(
+        self,
+        dxf: object,
+        station_id: str,
+        body_points: list,
+        text_height: float = 2.0,
+    ):
+        """Draw the body line of one station for checking the data: the
+        polyline, its centerline, and next to every point a label
+        ``n (breadth source, height source)``, e.g. ``3 (Breadth Deck, Height
+        Deck)`` or ``7 (500 mm, Height Buttock I)``. n is the number of the
+        point from the top. The coordinates are not shifted.
+
+        The base line (y = 0) and the waterlines (``waterlines_positions``) are
+        drawn as horizontal lines with their names on the left, the buttocks
+        (``buttocks_positions``) as vertical lines with their names on the top.
+        """
+        points = self.loft_body_line_sources(station_id, body_points)
+        if not points:
+            return
+
+        def source(src):
+            return src if isinstance(src, str) else self.format_length(src)
+
+        xs = [x for x, _, _, _ in points]
+        ys = [y for _, y, _, _ in points]
+        waterlines = self.waterlines_positions()
+        buttocks = self.buttocks_positions()
+        y_min = min([0.0] + ys + list(waterlines.values()))
+        y_max = max([0.0] + ys + list(waterlines.values()))
+        left, right = -30.0, max(xs + list(buttocks.values())) + 10.0
+
+        dxf.add_grid_polyline([(0, y_min - 10), (0, y_max + 10)])
+        dxf.text((1, y_max + 10), "station " + station_id, height=text_height)
+
+        # the base line and the waterlines, named on the left
+        for name, y in [("baseline", 0.0)] + list(waterlines.items()):
+            dxf.add_grid_polyline([(left, y), (right, y)])
+            dxf.text(
+                (left - 1, y + 0.5),
+                "%s (%s)" % (name, self.format_length(y)),
+                align="right",
+                height=text_height,
+            )
+
+        # the buttocks, named on the top
+        for name, x in buttocks.items():
+            dxf.add_grid_polyline([(x, y_min - 10), (x, y_max + 10)])
+            dxf.text(
+                (x, y_max + 11),
+                "%s (%s)" % (name, self.format_length(x)),
+                align="center",
+                height=text_height,
+            )
+        dxf.add_red_polyline([(x, y) for x, y, _, _ in points])
+        for n, (x, y, breadth_src, height_src) in enumerate(points, 1):
+            dxf.text(
+                (x + 1, y + 0.5),
+                "%d (%s, %s)" % (n, source(breadth_src), source(height_src)),
+                height=text_height,
+            )
 
     BODY_PLACEMENTS = ("raw", "max_breadth", "right")
     BODY_SIDES = ("half", "both", "split")
@@ -348,18 +569,22 @@ class Model:
         body_points: list,
         placement: str = "max_breadth",
         gap: float = 24.0,
-        sides: str = "half",
+        sides: str = None,
         bow_station: str = None,
     ):
         """Return ``{station: [polyline, ...]}``: the body lines of every station.
 
-        ``body_points`` is as for ``loft_body_line``. Points whose table cell is
+        ``body_points`` is as for ``loft_body_line``. The waterlines that are in
+        the table are always added (``waterline_body_points``). Points whose
+        table cell is
         empty (or not a plain offset) at a station are skipped. Every polyline
         is sorted from the top (sheer) down.
 
-        ``sides`` - which halves are drawn:
+        ``sides`` - which halves are drawn. The default (None) is ``"split"``
+        for ``placement="max_breadth"``, i.e. for a body plan in the middle of
+        the profile view, and ``"half"`` otherwise (see ``body_plan_sides``):
 
-        - ``"half"`` (default): the half-breadth to the right of the centerline;
+        - ``"half"``: the half-breadth to the right of the centerline;
         - ``"both"``: both halves, mirrored about the centerline, as one
           polyline per station (right sheer, down to the keel, up to the left
           sheer);
@@ -386,10 +611,13 @@ class Model:
                 "unknown placement %r, expected one of %s"
                 % (placement, self.BODY_PLACEMENTS)
             )
+        sides = self.body_plan_sides(placement, sides)
         if sides not in self.BODY_SIDES:
             raise ValueError(
                 "unknown sides %r, expected one of %s" % (sides, self.BODY_SIDES)
             )
+
+        body_points = list(body_points) + self.waterline_body_points()
 
         positions = self.station_positions()
         if bow_station is None:
@@ -452,8 +680,17 @@ class Model:
             }
         return lines
 
+    @staticmethod
+    def body_plan_sides(placement: str, sides: str = None):
+        """The sides to draw: ``sides`` if given, otherwise ``"split"`` for a
+        body plan in the middle of the profile view (``"max_breadth"``) and
+        ``"half"`` for the others."""
+        if sides is not None:
+            return sides
+        return "split" if placement == "max_breadth" else "half"
+
     def body_plan_grid_options(
-        self, lines: dict, sides: str = "half", margin: float = 12.0
+        self, lines: dict, sides: str = None, margin: float = 12.0
     ):
         """Keyword arguments for ``plot_grid`` for a body plan placed to the
         right of the profile view (``lines`` as returned by ``loft_body_lines``
@@ -469,6 +706,7 @@ class Model:
         cl = self.body_plan_centerline_x
         xs = [x for p in polylines for x, _ in p]
         ys = [y for p in polylines for _, y in p]
+        sides = self.body_plan_sides("right", sides)
         buttocks = {}
         for name, offset in self.buttocks_positions().items():
             buttocks[name] = [cl + offset]
@@ -479,6 +717,21 @@ class Model:
             "body_centerline": (cl, min(ys) - margin, max(ys) + margin),
             "body_buttocks": buttocks,
         }
+
+    def plot_body_lines(self, dxf: object, lines: dict, labels: bool = True):
+        """Draw the body lines (as returned by ``loft_body_lines``) into
+        ``dxf``. With ``labels`` the station name is written above the top end
+        of every body line.
+        """
+        for station, polys in lines.items():
+            for poly in polys:
+                if not poly:
+                    continue
+                dxf.add_red_polyline(poly)
+                if labels:
+                    # the highest point; the polylines run from the top down
+                    x, y = max(poly, key=lambda pt: pt[1])
+                    dxf.text((x, y + 1), station, align="center")
 
     @staticmethod
     def body_polylines(lines: dict):
@@ -502,6 +755,24 @@ class Model:
             left_extent = -min(xs) if xs and min(xs) < 0 else 0.0
             return max(positions.values()) + gap + left_extent
         return 0.0
+
+    def waterline_row(self, name: str) -> str:
+        """(virtual) The name of the table row with the half-breadths of the
+        waterline ``name`` (a key of ``waterlines_positions``). The default is
+        the same name."""
+        return name
+
+    def waterline_body_points(self) -> list:
+        """The waterlines as points of a body line: ``[(breadth_row, height)]``
+        for every waterline of ``waterlines_positions`` that has its row
+        (``waterline_row``) in the table. The half-breadth is from the table
+        and the height is the position of the waterline."""
+        rows = set(self._too["#"])
+        return [
+            (self.waterline_row(name), height)
+            for name, height in self.waterlines_positions().items()
+            if self.waterline_row(name) in rows
+        ]
 
     def line_to_index(self, line_id: str) -> int:
         """Return the row index of the line named line_id (the "#" column)"""
@@ -528,7 +799,7 @@ class Model:
             raise ValueError(
                 "no offset for line %r at station %r" % (line_id, station_id)
             )
-        value = TableOfOffsets.offset2double(offset)
+        value = self.offset_to_inches(offset)
         if not vertical:
             # base_offset() positions lines on the drawing sheet (vertical only)
             return value
@@ -565,6 +836,11 @@ class DXF:
     The file is saved when the ``with`` block exits. Layers: ``grid``,
     ``red`` (lofted lines), ``text``.
 
+    ``unit`` - the unit of the coordinates in the file (``OUTPUT_UNITS``,
+    default ``"inch"``). The coordinates given to the methods are in inches;
+    they are scaled to ``unit`` (and so are the text heights) and the unit is
+    stored in the file (``$INSUNITS``).
+
     ACI colors
     1: Red
     2: Yellow
@@ -575,9 +851,22 @@ class DXF:
     7: White or black
     """
 
-    def __init__(self, output_dxf: str):
+    def __init__(self, output_dxf: str, unit: str = "inch"):
+        if unit not in OUTPUT_UNITS:
+            raise ValueError(
+                "unknown output unit %r, expected one of %s" % (unit, OUTPUT_UNITS)
+            )
         self._output_dxf = output_dxf
+        self._unit = unit
+        self._scale = 1.0 / TableOfOffsets.UNITS[unit]  # inches -> unit
         self._doc = ezdxf.new("R2010")
+        self._doc.units = {
+            "inch": ezdxf.units.IN,
+            "ft": ezdxf.units.FT,
+            "mm": ezdxf.units.MM,
+            "cm": ezdxf.units.CM,
+            "m": ezdxf.units.M,
+        }[unit]
         self._msp = self._doc.modelspace()
         self._doc.layers.add(name="grid", color=6)
         self._doc.layers.add(name="red", color=1)
@@ -600,27 +889,41 @@ class DXF:
 
         return True
 
+    def _scaled(self, poly: list) -> list:
+        """The points (in inches) in the unit of the file"""
+        return [(x * self._scale, y * self._scale) for x, y in poly]
+
     def add_polyline(self, poly: list):
         """Add a 2D polyline ``[(x, y), ...]`` to the default layer."""
-        self._msp.add_polyline2d(poly)
+        self._msp.add_polyline2d(self._scaled(poly))
 
     def add_red_polyline(self, poly: list):
         """Add a 2D polyline to the ``red`` layer."""
-        self._msp.add_polyline2d(poly, dxfattribs={"layer": "red"})
+        self._msp.add_polyline2d(self._scaled(poly), dxfattribs={"layer": "red"})
 
     def add_grid_polyline(self, poly: list):
         """Add a 2D polyline to the ``grid`` layer."""
-        self._msp.add_polyline2d(poly, dxfattribs={"layer": "grid"})
+        self._msp.add_polyline2d(self._scaled(poly), dxfattribs={"layer": "grid"})
 
     def close(self):
-        """Save the file. Called automatically on leaving the ``with`` block."""
+        """Save the file (the directory is created if needed). Called
+        automatically on leaving the ``with`` block."""
         if self._doc is not None:
+            out_dir = os.path.dirname(self._output_dxf)
+            if out_dir:
+                os.makedirs(out_dir, exist_ok=True)
             self._doc.saveas(self._output_dxf)
             self._doc = None
             self._msp = None
 
-    def text(self, xy: tuple, txt: str):
+    def text(self, xy: tuple, txt: str, align: str = "left", height: float = 1.0):
         """Add text to the ``text`` layer
+
+        height - the height of the text in inches.
+
+        align - ``"left"`` (``xy`` is the bottom left corner of the text),
+        ``"center"`` (the middle of the bottom of the text) or ``"right"`` (the
+        bottom right corner).
 
         # Using a predefined text style:
         msp.add_text(
@@ -629,6 +932,13 @@ class DXF:
             dxfattribs={"style": "LiberationSerif"}
         ).set_placement((2, 6), align=TextEntityAlignment.LEFT)
         """
-        self._msp.add_text(txt, height=1.0, dxfattribs={"layer": "text"}).set_placement(
-            xy, align=ezdxf.enums.TextEntityAlignment.LEFT
+        alignment = {
+            "left": ezdxf.enums.TextEntityAlignment.LEFT,
+            "center": ezdxf.enums.TextEntityAlignment.BOTTOM_CENTER,
+            "right": ezdxf.enums.TextEntityAlignment.BOTTOM_RIGHT,
+        }[align]
+        self._msp.add_text(
+            txt, height=height * self._scale, dxfattribs={"layer": "text"}
+        ).set_placement(
+            (xy[0] * self._scale, xy[1] * self._scale), align=alignment
         )
