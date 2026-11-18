@@ -2,8 +2,8 @@
 
 Heights (Sheer, the buttocks, Rabbet, Profile) are measured from the DWL, positive up. Half-breadths
 are the "Sheerline", "... LL", "... DL" and "Rabbet Line" rows. The diagonals D1-D3 are given
-(``diagonals_positions``, heights above the DWL). The keel is not in the body lines: the table
-has no half-breadth for the Profile.
+(``diagonals_positions``, heights above the DWL). The Profile (keel line) has no
+half-breadth in the table: its body line points use that of the "Rabbet Line".
 
 Run: ``python3 project181.py [--out-dir DIR] [--output-units UNIT]`` -> writes, into ./out (in the
 current directory) or DIR, test_project181.dxf (everything, body lines in the middle of the profile
@@ -116,6 +116,11 @@ class Project181(table_of_offsets.Model):
     def rabbet_body_point(self):
         return ("Rabbet Line", "Rabbet")
 
+    def keel_body_point(self):
+        """The profile (keel) line: the table has the heights only, the
+        half-breadth is that of the rabbet line"""
+        return ("Rabbet Line", "Profile")
+
     def body_points(self):
         """The (breadth, height) points of a body line, without the waterlines
         and the diagonals (``loft_body_lines`` adds them): a string is a table
@@ -123,6 +128,7 @@ class Project181(table_of_offsets.Model):
         return [
             ("Sheerline", "Sheer"),
             ("Rabbet Line", "Rabbet"),
+            ("Rabbet Line", "Profile"),
             # buttocks: height from the table, breadth is the buttock
             (36.0, '36" Buttock'),
             (24.0, '24" Buttock'),
@@ -171,6 +177,7 @@ class Project181(table_of_offsets.Model):
             dxf.add_red_polyline(self.loft_line_n_sorted(2))
             dxf.add_red_polyline(self.loft_line_n_sorted(3))
             dxf.add_red_polyline(self.loft_line_n_sorted(4))
+            dxf.add_red_polyline(self.loft_line_n_sorted(5))  # Profile (keel)
             #
             dxf.add_red_polyline(self.loft_line_n_sorted(6))
             # waterlines: 24" LL, 16" LL, 8" LL, DWL, 8" DL, 16" DL
