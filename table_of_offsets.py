@@ -836,6 +836,7 @@ class Model:
         no rabbet line. Its points of the consecutive stations make the rabbet
         line of the body plan."""
         return None
+
     @staticmethod
     def body_plan_sides(placement: str, sides: str = None):
         """The sides to draw: ``sides`` if given, otherwise ``"split"`` for a
@@ -1044,9 +1045,7 @@ class Model:
             origins = self.grid_y_origins()
             origin_y = origins[1] if len(origins) > 1 else 0.0
         positions = self.station_positions()
-        names = {
-            self.diagonal_row(name): name for name in self.diagonals_positions()
-        }
+        names = {self.diagonal_row(name): name for name in self.diagonals_positions()}
         lines = {}
         for point in self.diagonal_body_points():
             points = self._station_points(positions, [point])
@@ -1107,9 +1106,7 @@ class Model:
         if not vertical:
             # base_offset() positions lines on the drawing sheet (vertical only)
             return value
-        return self.offset_sign(station_id, line_id) * value + self.base_offset(
-            line_id
-        )
+        return self.offset_sign(station_id, line_id) * value + self.base_offset(line_id)
 
     def breadth_at(self, station_id: str, line_id: str) -> float:
         """returns the half-breadth (inches) at the given station_id at the given line_id
@@ -1243,6 +1240,4 @@ class DXF:
         }[align]
         self._msp.add_text(
             txt, height=height * self._scale, dxfattribs={"layer": "text"}
-        ).set_placement(
-            (xy[0] * self._scale, xy[1] * self._scale), align=alignment
-        )
+        ).set_placement((xy[0] * self._scale, xy[1] * self._scale), align=alignment)

@@ -50,6 +50,26 @@ class Test_Project89BodyLines(unittest.TestCase):
             self.project.body_lines("raw", "half"), self.project.body_lines("raw")
         )
 
+    def test_default_sides(self):
+        model = table_of_offsets.Model
+        # in the middle of the profile view: split; otherwise: half
+        self.assertEqual("split", model.body_plan_sides("max_breadth"))
+        self.assertEqual("half", model.body_plan_sides("right"))
+        self.assertEqual("half", model.body_plan_sides("raw"))
+        self.assertEqual("both", model.body_plan_sides("max_breadth", "both"))
+
+        default = self.project.body_lines()
+        self.assertEqual(default, self.project.body_lines("max_breadth", "split"))
+        # the midship station is drawn on both sides, the others on one
+        counts = sorted(len(p) for p in default.values())
+        self.assertEqual([1] * 17 + [2], counts)
+        self.assertEqual(
+            self.project.body_lines("right", "half"), self.project.body_lines("right")
+        )
+        self.assertEqual(
+            self.project.body_lines("raw", "half"), self.project.body_lines("raw")
+        )
+
     def test_station_18_points(self):
         (poly,) = self.project.body_lines("raw")["18"]
         # the sheer is the top point: 1/2w Deck 4-3-0 at height Sheer 1-7-6
@@ -63,13 +83,13 @@ class Test_Project89BodyLines(unittest.TestCase):
         positions = self.project.station_positions()
 
         mid = self.project.body_lines("max_breadth", "half")
-        self.assertEqual(
-            raw[widest][0][0][0] + positions[widest], mid[widest][0][0][0]
-        )
+        self.assertEqual(raw[widest][0][0][0] + positions[widest], mid[widest][0][0][0])
         self.assertEqual(raw["18"][0][0][1], mid["18"][0][0][1])  # y is not changed
 
         right = self.project.body_lines("right")
-        left_edge = min(x for p in table_of_offsets.Model.body_polylines(right) for x, _ in p)
+        left_edge = min(
+            x for p in table_of_offsets.Model.body_polylines(right) for x, _ in p
+        )
         self.assertGreater(left_edge, max(positions.values()))
 
         with self.assertRaises(ValueError):
@@ -144,9 +164,7 @@ class Test_Project89BodyLines(unittest.TestCase):
                 if e.dxf.layer == "grid" and e.dxftype() == "POLYLINE"
             ]
             lines = self.project.body_lines("right")
-            body_x = max(
-                x for p in self.project.body_polylines(lines) for x, _ in p
-            )
+            body_x = max(x for p in self.project.body_polylines(lines) for x, _ in p)
             cl_x = self.project.body_plan_centerline_x
 
             # the base line (y == 0) and the waterlines run through the body plan
@@ -234,7 +252,9 @@ class Test_Project89BodyLines(unittest.TestCase):
             sp = self.project.loft_body_line(station, [first], skip_missing=True)
             for poly in polys:
                 if sp:
-                    expected.append((sp[0][0] if poly[0][0] > 0 else -sp[0][0], sp[0][1]))
+                    expected.append(
+                        (sp[0][0] if poly[0][0] > 0 else -sp[0][0], sp[0][1])
+                    )
         self.assertEqual(sorted(expected), sorted(left + right))
         self.assertEqual(len(left), len(set(left)))
         # half: only one line, on the right
@@ -263,8 +283,11 @@ class Test_Project89BodyLines(unittest.TestCase):
             rp = self.project.loft_body_line(station, [point], skip_missing=True)
             for poly in polys:
                 if rp:
-                    expected.append((rp[0][0] if poly[0][0] > 0 else -rp[0][0], rp[0][1]))
+                    expected.append(
+                        (rp[0][0] if poly[0][0] > 0 else -rp[0][0], rp[0][1])
+                    )
         self.assertEqual(sorted(expected), sorted(rabbet[0] + rabbet[1]))
+
         # a model without the rabbet has no rabbet line
         class NoRabbet(type(self.project)):
             def rabbet_body_point(self):
@@ -284,7 +307,9 @@ class Test_Project89BodyLines(unittest.TestCase):
             kp = self.project.loft_body_line(station, [point], skip_missing=True)
             for poly in polys:
                 if kp:
-                    expected.append((kp[0][0] if poly[0][0] > 0 else -kp[0][0], kp[0][1]))
+                    expected.append(
+                        (kp[0][0] if poly[0][0] > 0 else -kp[0][0], kp[0][1])
+                    )
         self.assertEqual(sorted(expected), sorted(keel[0] + keel[1]))
 
     def test_station_labels(self):
@@ -311,13 +336,20 @@ class Test_Project89BodyLines(unittest.TestCase):
             self.assertEqual(len(red) - n_extra, len(texts))
 
             expected = sorted(
-                (station, round(max(p, key=lambda pt: pt[1])[0], 3),
-                 round(max(p, key=lambda pt: pt[1])[1] + 1, 3))
+                (
+                    station,
+                    round(max(p, key=lambda pt: pt[1])[0], 3),
+                    round(max(p, key=lambda pt: pt[1])[1] + 1, 3),
+                )
                 for station, polys in lines.items()
                 for p in polys
             )
             actual = sorted(
-                (e.dxf.text, round(e.dxf.align_point.x, 3), round(e.dxf.align_point.y, 3))
+                (
+                    e.dxf.text,
+                    round(e.dxf.align_point.x, 3),
+                    round(e.dxf.align_point.y, 3),
+                )
                 for e in texts
             )
             self.assertEqual(expected, actual)
