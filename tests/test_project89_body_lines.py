@@ -26,8 +26,10 @@ class Test_Project89BodyLines(unittest.TestCase):
             (poly,) = polys
             heights = [y for _, y in poly]
             self.assertEqual(sorted(heights, reverse=True), heights, station)
-        # 13 points and the horizontal link from the keel to the centerline
-        self.assertEqual(14, len(lines["18"][0]))
+        # 13 points, the D1-D3 points, the keel point (the "and" cell of the
+        # Profile Plan, first value) and the link from the keel to the
+        # centerline
+        self.assertEqual(18, len(lines["18"][0]))
         self.assertEqual(self.project.body_plan_centerline_x, lines["18"][0][-1][0])
 
     def test_default_sides(self):
@@ -206,8 +208,10 @@ class Test_Project89BodyLines(unittest.TestCase):
             labels = [e.dxf.text for e in msp if e.dxftype() == "TEXT"]
             n_wl = len(self.project.waterlines_positions())
             n_b = len(self.project.buttocks_positions())
-            # base line + waterlines + CL + buttocks on both sides (split)
-            self.assertEqual(1 + n_wl + 1 + 2 * n_b, len(grid))
+            n_d = len(self.project.diagonals_positions())
+            # base line + waterlines + CL + buttocks and diagonals on both
+            # sides (split)
+            self.assertEqual(1 + n_wl + 1 + 2 * n_b + 2 * n_d, len(grid))
             self.assertIn("CL", labels)
             self.assertIn("baseline", labels)
             for name in self.project.waterlines_positions():

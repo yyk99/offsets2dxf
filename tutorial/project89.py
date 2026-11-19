@@ -2,8 +2,8 @@
 
 Heights (Sheer, B 3', B 2', B 1', Rabbet, Profile) are measured from the LWL,
 positive up. Half-breadths are the "1/2w Deck", "WL ..." and "... Plan" rows.
-Some cells hold two values ("0-2-0 and 0-3-0"); such points are skipped in the
-body lines.
+Some cells hold two values ("0-2-0 and 0-3-0"); the first one is used
+(``set_multi_value_policy("first")``).
 
 The bow is station 0 (``set_bow_station``); the stern, station 33, is at x = 0.
 
@@ -20,7 +20,9 @@ Run: ``python3 project89.py [--out-dir DIR] [--output-units UNIT]`` writes, into
 current directory) or DIR, test_project89.dxf (everything),
 test_project89_body_right.dxf (body plan to the right),
 test_project89_body_split.dxf (aft/forward halves) and
-test_project89_body.dxf (body lines only).
+test_project89_body.dxf (body lines only) and
+test_project89_station14.dxf, _station16.dxf and _station18.dxf (the body line
+of the station with every point labelled).
 """
 
 import context
@@ -37,6 +39,7 @@ class Project89(table_of_offsets.Model):
         super().__init__(
             os.path.join(os.path.dirname(__file__), "../sample_data/offset_table.csv")
         )
+        self.set_multi_value_policy("first")
         self.set_bow_station("0")  # the stem; the stern (station 33) is at x = 0
         # fmt: off
         self.set_under_waterline(
@@ -105,11 +108,39 @@ class Project89(table_of_offsets.Model):
         """(virtual) we want two horizontal grid lines"""
         return [0, 10 * 12.0]
 
+    def diagonals_positions(self):
+        """{name: (y0, x1, y1)}, inches above the LWL: the line from (0, y0)
+        through (x1, y1). Given: D1 from (0, -12) = WL - 1' through
+        (36, -36) = (B 3', WL - 3'). D2 from (0, 0) = LWL through
+        (36, -36). D3 from (0, 24) = WL + 2' through (60, -6) = (60",
+        WL - 6")."""
+        return {
+            "D1": (-12.0, 36.0, -36.0),
+            "D2": (0.0, 36.0, -36.0),
+            "D3": (24.0, 60.0, -6.0),
+        }
+
+    def diagonal_row(self, name: str) -> str:
+        return {"D1": "Diagonal 1", "D2": "D 2", "D3": "D 3"}.get(name, name)
+
     def keel_body_point(self):
         return ("Profile Plan", "Profile")
 
     def rabbet_body_point(self):
         return ("Rabbet Plan", "Rabbet")
+
+    def body_points(self):
+        """The (breadth, height) points of a body line, without the waterlines
+        and the diagonals (``loft_body_lines`` adds them): a string is a table
+        row, a number is inches."""
+        body_points = [
+            ("1/2w Deck", "Sheer"),
+            ("Rabbet Plan", "Rabbet"),
+            ("Profile Plan", "Profile"),
+        ]
+        # buttocks: height from the table, breadth is the buttock
+        body_points += [(36.0, "B 3'"), (24.0, "B 2'"), (12.0, "B 1'")]
+        return body_points
 
     def body_lines(
         self,
@@ -121,18 +152,18 @@ class Project89(table_of_offsets.Model):
 
         Points are (half-breadth, height above the LWL) in inches.
         """
-        # (breadth, height): a string is a table row, a number is inches
-        body_points = [
-            ("1/2w Deck", "Sheer"),
-            ("Rabbet Plan", "Rabbet"),
-            ("Profile Plan", "Profile"),
-        ]
-        # the waterlines are added by loft_body_lines (waterlines_positions)
-        # buttocks: height from the table, breadth is the buttock
-        body_points += [(36.0, "B 3'"), (24.0, "B 2'"), (12.0, "B 1'")]
+        body_points = self.body_points()
         return self.loft_body_lines(
             body_points, placement, sides=sides, bow_station=bow_station
         )
+
+    def save_station_as(self, filename_dxf: str, station: str):
+        """Save the body line of one station for checking the data: every point
+        is labelled with the table rows its coordinates come from."""
+        with self.open_dxf(filename_dxf) as dxf:
+            self.plot_annotated_body_line(
+                dxf, station, self.body_points(), point_text_height=1.0
+            )
 
     def save_body_lines_as(
         self, filename_dxf: str, placement: str = "max_breadth", sides: str = None
@@ -174,6 +205,9 @@ class Project89(table_of_offsets.Model):
             dxf.add_red_polyline(self.loft_line_n(11))
             dxf.add_red_polyline(self.loft_line_n(12))
 
+            # the diagonals in the plan view, below the plan centerline
+            self.plot_diagonal_plan_lines(dxf)
+
             self.plot_body_lines(dxf, body_lines)
 
 
@@ -198,5 +232,10 @@ if __name__ == "__main__":
     )
     proj.save_body_lines_as(out("test_project89_body.dxf"))
     print("Saved as:", out("test_project89_body.dxf"))
+    # the body line of single stations, every point labelled
+    for station in ("14", "16", "18"):
+        filename = out("test_project89_station%s.dxf" % station)
+        proj.save_station_as(filename, station)
+        print("Saved as:", filename)
 
 # end of file

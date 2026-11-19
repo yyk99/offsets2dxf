@@ -129,6 +129,30 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class Test_MultiValue(unittest.TestCase):
+    def test_offset_to_inches(self):
+        f = table_of_offsets.offset_to_inches
+        with self.assertRaises(ValueError):
+            f("0-2-0 and 0-3-0")  # "error" is the default
+        self.assertEqual(2.0, f("0-2-0 and 0-3-0", "ftin", "first"))
+        self.assertEqual(2.0, f("0-2-0", "ftin", "first"))  # a plain cell
+        self.assertEqual(50.0, f(" 50 and 60 ", "inch", "first"))
+        with self.assertRaises(ValueError):
+            f("0-2-0", "ftin", "nope")
+
+    def test_model_policy(self):
+        """Project 89 Profile at station 14 is "4-3-0 and 4-8-4", below the LWL."""
+        from project89 import Project89
+
+        model = Project89()
+        self.assertEqual(-51.0, model.height_at("14", "Profile"))
+        model.set_multi_value_policy("error")
+        with self.assertRaises(ValueError):
+            model.height_at("14", "Profile")
+        with self.assertRaises(ValueError):
+            model.set_multi_value_policy("nope")
+
+
 class Test_Units(unittest.TestCase):
     def test_offset_to_inches(self):
         f = table_of_offsets.offset_to_inches

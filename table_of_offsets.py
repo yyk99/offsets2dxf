@@ -24,6 +24,7 @@ Classes:
 import argparse
 import math
 import os
+import re
 
 import ezdxf
 import ezdxf.entities
@@ -137,8 +138,23 @@ TableOfOffsets.UNITS = {
 OUTPUT_UNITS = ("inch", "ft", "mm", "cm", "m")
 
 
-def offset_to_inches(value: str, unit: str = "ftin") -> float:
+# What to do with a cell that holds several values ("0-2-0 and 0-3-0"):
+# "error" (default) - the cell is malformed (ValueError), "first" - use the
+# first value.
+MULTI_VALUE_POLICIES = ("error", "first")
+
+# the separator of the values in such a cell
+MULTI_VALUE_SEPARATOR = re.compile(r"\s+and\s+")
+
+
+def offset_to_inches(
+    value: str, unit: str = "ftin", multi_value: str = "error"
+) -> float:
     """Convert an offset from a table cell to inches.
+
+    multi_value - what to do with a cell of the form ``offset1 and offset2``,
+    one of ``MULTI_VALUE_POLICIES``: ``"error"`` (default) raises ValueError,
+    ``"first"`` uses ``offset1``.
 
     unit - one of ``TableOfOffsets.UNITS``: ``"ftin"`` (default) is the
     ``feet-inches-eighths`` notation, the others are plain numbers, e.g.
@@ -149,6 +165,13 @@ def offset_to_inches(value: str, unit: str = "ftin") -> float:
         raise ValueError(
             "unknown unit %r, expected one of %s" % (unit, list(TableOfOffsets.UNITS))
         )
+    if multi_value not in MULTI_VALUE_POLICIES:
+        raise ValueError(
+            "unknown multi_value policy %r, expected one of %s"
+            % (multi_value, list(MULTI_VALUE_POLICIES))
+        )
+    if multi_value == "first":
+        value = MULTI_VALUE_SEPARATOR.split(value.strip())[0]
     if unit == "ftin":
         return TableOfOffsets.offset2double(value)
     return float(value) * TableOfOffsets.UNITS[unit]
@@ -227,6 +250,7 @@ class Model:
                 % (unit, list(TableOfOffsets.UNITS))
             )
         self._unit = unit
+        self._multi_value = "error"
         self._filename_csv = _filename_csv
         # read the cells as text: the numbers are converted by offset_to_inches
         self._too = pandas.read_csv(self._filename_csv, dtype=str)
@@ -267,7 +291,19 @@ class Model:
 
     def offset_to_inches(self, value: str) -> float:
         """Convert a cell of the table to inches, using the unit of the table."""
-        return offset_to_inches(value, self._unit)
+        return offset_to_inches(value, self._unit, self._multi_value)
+
+    def set_multi_value_policy(self, policy: str):
+        """What to do with a cell that holds several values, ``offset1 and
+        offset2``: one of ``MULTI_VALUE_POLICIES``; ``"error"`` (default) makes
+        the point malformed (it is skipped where the cells are optional),
+        ``"first"`` uses ``offset1``."""
+        if policy not in MULTI_VALUE_POLICIES:
+            raise ValueError(
+                "unknown multi_value policy %r, expected one of %s"
+                % (policy, list(MULTI_VALUE_POLICIES))
+            )
+        self._multi_value = policy
 
     def set_output_unit(self, unit: str = None):
         """Set the unit of the coordinates in the .dxf files (``OUTPUT_UNITS``).
