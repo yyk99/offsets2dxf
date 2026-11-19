@@ -352,6 +352,25 @@ class Test_Diagonals(unittest.TestCase):
             {k: v for k, v in segments.items() if k == "1"},
         )
 
+    def test_segments_extension(self):
+        """the diagonal runs ``diagonal_extension()`` beyond the farthest hull
+        point (0.8, 0.6 per inch along it)"""
+        far = max(
+            self.model.offset_to_inches(c)
+            for c in self.model._too.loc[
+                self.model.line_to_index("Diagonal 1"),
+                list(self.model.station_positions()),
+            ]
+            if isinstance(c, str)
+        )
+        self.model.diagonal_extension = lambda: 3.0
+        segments = self.model.diagonal_segments(5.0, both=True)
+        (a, b), (c, d) = segments["1"]
+        self.assertEqual((5.0, 10.0), a)
+        self.assertAlmostEqual(5.0 + 0.8 * (far + 3.0), b[0])
+        self.assertAlmostEqual(10.0 + 0.6 * (far + 3.0), b[1])
+        self.assertAlmostEqual(5.0 - 0.8 * (far + 3.0), d[0])
+
 
 class Test_Output(unittest.TestCase):
     def test_output_dir_from_args(self):

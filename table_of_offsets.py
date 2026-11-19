@@ -580,6 +580,7 @@ class Model:
         station_id: str,
         body_points: list,
         text_height: float = 2.0,
+        point_text_height: float = None,
     ):
         """Draw the body line of one station for checking the data: the
         polyline, its centerline, and next to every point a label
@@ -590,10 +591,15 @@ class Model:
         The base line (y = 0) and the waterlines (``waterlines_positions``) are
         drawn as horizontal lines with their names on the left, the buttocks
         (``buttocks_positions``) as vertical lines with their names on the top.
+
+        ``text_height`` is the height of the labels of the grid, ``point_text_height``
+        the height of the point labels (default ``text_height``).
         """
         points = self.loft_body_line_sources(station_id, body_points)
         if not points:
             return
+        if point_text_height is None:
+            point_text_height = text_height
 
         def source(src):
             return src if isinstance(src, str) else self.format_length(src)
@@ -637,7 +643,7 @@ class Model:
             dxf.text(
                 (x + 1, y + 0.5),
                 "%d (%s, %s)" % (n, source(breadth_src), source(height_src)),
-                height=text_height,
+                height=point_text_height,
             )
 
     BODY_PLACEMENTS = ("raw", "max_breadth", "right")
@@ -1018,13 +1024,33 @@ class Model:
             if self.waterline_row(name) in rows
         ]
 
+    def diagonal_extension(self):
+        """(virtual) How far (inches, along the line) the diagonals are drawn
+        beyond the farthest hull point of the table. The default ``None``
+        draws them up to their second point ``(x1, y1)``."""
+        return None
+
     def diagonal_segments(self, centerline_x: float = 0.0, both: bool = False):
         """The diagonals as line segments for drawing: ``{name: [((x, y),
         (x, y)), ...]}``, from ``(centerline_x, y0)`` to the second point of
         the diagonal, plus the mirror image about the centerline if ``both``.
+
+        With ``diagonal_extension()`` the end is that far beyond the farthest
+        hull point of the diagonal in the table (the second point if the
+        diagonal is not in the table).
         """
+        extension = self.diagonal_extension()
+        ends = {}
+        if extension is not None:
+            positions = self.station_positions()
+            for point in self.diagonal_body_points():
+                points = self._station_points(positions, [point])
+                if points:
+                    far = max(abs(b) for b, _ in points.values()) / point._ux
+                    ends[point.row] = point.point(far + extension)
         segments = {}
         for name, (y0, x1, y1) in self.diagonals_positions().items():
+            x1, y1 = ends.get(self.diagonal_row(name), (x1, y1))
             segments[name] = [((centerline_x, y0), (centerline_x + x1, y1))]
             if both:
                 segments[name].append(((centerline_x, y0), (centerline_x - x1, y1)))

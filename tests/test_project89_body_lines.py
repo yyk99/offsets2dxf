@@ -50,26 +50,6 @@ class Test_Project89BodyLines(unittest.TestCase):
             self.project.body_lines("raw", "half"), self.project.body_lines("raw")
         )
 
-    def test_default_sides(self):
-        model = table_of_offsets.Model
-        # in the middle of the profile view: split; otherwise: half
-        self.assertEqual("split", model.body_plan_sides("max_breadth"))
-        self.assertEqual("half", model.body_plan_sides("right"))
-        self.assertEqual("half", model.body_plan_sides("raw"))
-        self.assertEqual("both", model.body_plan_sides("max_breadth", "both"))
-
-        default = self.project.body_lines()
-        self.assertEqual(default, self.project.body_lines("max_breadth", "split"))
-        # the midship station is drawn on both sides, the others on one
-        counts = sorted(len(p) for p in default.values())
-        self.assertEqual([1] * 17 + [2], counts)
-        self.assertEqual(
-            self.project.body_lines("right", "half"), self.project.body_lines("right")
-        )
-        self.assertEqual(
-            self.project.body_lines("raw", "half"), self.project.body_lines("raw")
-        )
-
     def test_station_18_points(self):
         (poly,) = self.project.body_lines("raw")["18"]
         # the sheer is the top point: 1/2w Deck 4-3-0 at height Sheer 1-7-6
