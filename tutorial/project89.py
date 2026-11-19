@@ -176,6 +176,7 @@ class Project89(table_of_offsets.Model):
 
             self.plot_body_lines(dxf, body_lines)
 
+
 if __name__ == "__main__":
     args = table_of_offsets.parse_script_args(description=__doc__)
     out_dir = args.out_dir

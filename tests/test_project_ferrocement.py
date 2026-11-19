@@ -37,9 +37,7 @@ class Test_ProjectFerrocement(unittest.TestCase):
 
     def test_inches(self):
         self.assertAlmostEqual(2644 * MM, self.project.height_at("9", "Height Sheer"))
-        self.assertAlmostEqual(
-            1290 * MM, self.project.breadth_at("2", "Breadth WL 5")
-        )
+        self.assertAlmostEqual(1290 * MM, self.project.breadth_at("2", "Breadth WL 5"))
         with self.assertRaises(ValueError):
             self.project.breadth_at("T", "Breadth WL 8")  # a dash in the source
 

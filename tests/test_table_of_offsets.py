@@ -208,7 +208,10 @@ class Test_OutputUnit(unittest.TestCase):
 
         mm = table_of_offsets.Model(
             os.path.join(
-                source_directory, "sample_data", "a_ferrocement_hull", "offset_table.csv"
+                source_directory,
+                "sample_data",
+                "a_ferrocement_hull",
+                "offset_table.csv",
             ),
             unit="mm",
         )
@@ -326,7 +329,9 @@ class Test_Diagonals(unittest.TestCase):
         cells = [
             s
             for s in positions
-            if isinstance(self.model._too.loc[self.model.line_to_index("Diagonal 1"), s], str)
+            if isinstance(
+                self.model._too.loc[self.model.line_to_index("Diagonal 1"), s], str
+            )
         ]
         self.assertEqual([positions[s] for s in cells], [x for x, _ in poly])
         # station 18: 18.25 in along the diagonal (0.8, 0.6): half-breadth 14.6
@@ -353,13 +358,14 @@ class Test_Diagonals(unittest.TestCase):
         far = max(
             self.model.offset_to_inches(c)
             for c in self.model._too.loc[
-                self.model.line_to_index("Diagonal 1"), list(self.model.station_positions())
+                self.model.line_to_index("Diagonal 1"),
+                list(self.model.station_positions()),
             ]
             if isinstance(c, str)
         )
         self.model.diagonal_extension = lambda: 3.0
         segments = self.model.diagonal_segments(5.0, both=True)
-        ((a, b), (c, d)) = segments["1"]
+        (a, b), (c, d) = segments["1"]
         self.assertEqual((5.0, 10.0), a)
         self.assertAlmostEqual(5.0 + 0.8 * (far + 3.0), b[0])
         self.assertAlmostEqual(10.0 + 0.6 * (far + 3.0), b[1])

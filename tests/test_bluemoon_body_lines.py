@@ -85,9 +85,7 @@ class Test_BlueMoonBodyLines(unittest.TestCase):
     def test_generate_dxf_split_on_the_right(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = os.path.join(tmp, "blue_moon_split.dxf")
-            self.project.save_model_as(
-                out, body_placement="right", body_sides="split"
-            )
+            self.project.save_model_as(out, body_placement="right", body_sides="split")
             doc = ezdxf.readfile(out)
             self.assertGreater(len(list(doc.modelspace())), 50)
 
