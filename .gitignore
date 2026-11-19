@@ -3,3 +3,4 @@ tutorial/*.dxf
 __pycache__/
 test_*.dxf
 *.local.csv
+*.bak
