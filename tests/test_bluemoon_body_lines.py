@@ -74,7 +74,9 @@ class Test_BlueMoonBodyLines(unittest.TestCase):
             self.assertTrue(os.path.exists(out))
             doc = ezdxf.readfile(out)
             red = [e for e in doc.modelspace() if e.dxf.layer == "red"]
-            self.assertEqual(9, len(red))  # one polyline per station
+            # one polyline per station, the sheer, rabbet and keel lines of each
+            # side
+            self.assertEqual(9 + 2 + 2 + 2, len(red))
             # the drawing is symmetric about the centerline x = 0
             xs = [p[0] for e in red for p in e.points()]
             self.assertAlmostEqual(max(xs), -min(xs))
@@ -83,9 +85,7 @@ class Test_BlueMoonBodyLines(unittest.TestCase):
     def test_generate_dxf_split_on_the_right(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = os.path.join(tmp, "blue_moon_split.dxf")
-            self.project.save_model_as(
-                out, body_placement="right", body_sides="split"
-            )
+            self.project.save_model_as(out, body_placement="right", body_sides="split")
             doc = ezdxf.readfile(out)
             self.assertGreater(len(list(doc.modelspace())), 50)
 

@@ -37,9 +37,7 @@ class Test_ProjectFerrocement(unittest.TestCase):
 
     def test_inches(self):
         self.assertAlmostEqual(2644 * MM, self.project.height_at("9", "Height Sheer"))
-        self.assertAlmostEqual(
-            1290 * MM, self.project.breadth_at("2", "Breadth WL 5")
-        )
+        self.assertAlmostEqual(1290 * MM, self.project.breadth_at("2", "Breadth WL 5"))
         with self.assertRaises(ValueError):
             self.project.breadth_at("T", "Breadth WL 8")  # a dash in the source
 
@@ -67,8 +65,9 @@ class Test_ProjectFerrocement(unittest.TestCase):
     def test_body_lines_with_waterlines(self):
         """the waterlines are in the list of the body line points"""
         (poly,) = self.project.body_lines("raw")["6"]
-        # sheer, deck, knuckle, keel, 3 buttocks and 8 waterlines
-        self.assertEqual(4 + 3 + 8, len(poly))
+        # sheer, deck, knuckle, keel, 3 buttocks and 8 waterlines, and the
+        # link from the keel to the centerline
+        self.assertEqual(4 + 3 + 8 + 1, len(poly))
         # WL 5 at station 6: breadth 1480 mm at the draught
         self.assertIn(
             (round(1480 * MM, 6), round(1800 * MM, 6)),
@@ -190,9 +189,10 @@ class Test_ProjectFerrocement(unittest.TestCase):
             self.project.save_body_lines_as(out)
             doc = ezdxf.readfile(out)
             # the default is split: one polyline per station, two for the
-            # midship station
+            # midship station, and the sheer and keel lines of each side (no
+            # rabbet)
             red = [e for e in doc.modelspace() if e.dxf.layer == "red"]
-            self.assertEqual(14, len(red))
+            self.assertEqual(14 + 2 + 2, len(red))
 
 
 if __name__ == "__main__":

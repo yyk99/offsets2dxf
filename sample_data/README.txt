@@ -21,6 +21,14 @@ a_ferrocement_hull/
     Model(csv, unit="mm"). The table is kept in its own unit; the program
     converts the values to inches (see "unit" in ../README.md).
 
+tabby_cat/
+    A small boat: the lines plan and the table of offsets (picture), see its
+    README.md.
+    offset_table.csv         the table as in the picture, in millimetres;
+                             stations 1..12; rows "Height ...", "Breadth ..."
+                             and "Diagonal ..."
+    Used by tutorial/project_tabby_cat.py (Model(csv, unit="mm")).
+
 CSV format
     First column "#": the line names. The other columns: stations. A cell is
     an offset in the unit of the table (feet-inches-eighths by default); an

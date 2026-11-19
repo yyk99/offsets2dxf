@@ -22,6 +22,7 @@ Classes:
 """
 
 import argparse
+import math
 import os
 
 import ezdxf
@@ -151,6 +152,40 @@ def offset_to_inches(value: str, unit: str = "ftin") -> float:
     if unit == "ftin":
         return TableOfOffsets.offset2double(value)
     return float(value) * TableOfOffsets.UNITS[unit]
+
+
+class DiagonalPoint:
+    """A point of a body line given by a diagonal: the table cell is the
+    distance along the diagonal from its first point ``(0, y0)`` on the
+    centerline toward its second point ``(x1, y1)``. Heights are above the base
+    line, all in inches. It can be used as an item of ``body_points`` (see
+    ``Model.diagonals_positions``).
+
+    ``row`` is the name of the table row with the distances.
+    """
+
+    def __init__(self, row: str, y0: float, x1: float, y1: float):
+        length = math.hypot(x1, y1 - y0)
+        if length == 0:
+            raise ValueError("the two points of the diagonal %r coincide" % (row,))
+        self.row = row
+        self.y0, self.x1, self.y1 = y0, x1, y1
+        self._ux, self._uy = x1 / length, (y1 - y0) / length
+
+    def point(self, distance: float):
+        """``(breadth, height)`` of the point ``distance`` from ``(0, y0)``."""
+        return (distance * self._ux, self.y0 + distance * self._uy)
+
+
+class BodyLines(dict):
+    """The result of ``Model.loft_body_lines``: ``{station: [polyline, ...]}``
+    with the attributes ``sheer``, ``rabbet`` and ``keel``, the sheer line, the
+    rabbet line and the keel line (see ``Model.body_sheer_polylines``,
+    ``Model.body_rabbet_polylines`` and ``Model.body_keel_polylines``)."""
+
+    sheer = ()
+    rabbet = ()
+    keel = ()
 
 
 class Model:
@@ -286,6 +321,20 @@ class Model:
         print("TODO: please define waterline_positions()")
         return {}
 
+    def diagonals_positions(self):
+        """(virtual) The diagonals of the body plan: ``{name: (y0, x1, y1)}``,
+        inches, heights above the base line. A diagonal is the straight line
+        from the point ``(0, y0)`` on the centerline through the point
+        ``(x1, y1)``; the table gives, per station, the distance along it from
+        ``(0, y0)`` to the hull. The default is no diagonals."""
+        return {}
+
+    def diagonal_row(self, name: str) -> str:
+        """(virtual) The name of the table row with the distances of the
+        diagonal ``name`` (a key of ``diagonals_positions``). The default is
+        the same name."""
+        return name
+
     def offset_sign(self, station: str, line: str):
         """Returns either 1 or -1
         The function is used if offsets are negative below waterline
@@ -349,6 +398,7 @@ class Model:
         profile_end_x: float = None,
         body_centerline: tuple = None,
         body_buttocks: dict = None,
+        body_diagonals: dict = None,
     ):
         """Draw the grid into ``dxf`` (a ``DXF`` object): central lines, one
         vertical line and label per station, waterlines and buttocks lines.
@@ -364,6 +414,10 @@ class Model:
         ``body_buttocks`` - ``{name: [x, ...]}``: draw the buttock lines of the
         body plan as vertical lines at these x, as high as ``body_centerline``
         (which must be given too).
+
+        ``body_diagonals`` - ``{name: [((x, y), (x, y)), ...]}``: draw the
+        diagonals of the body plan as lines with their names at the second
+        point (``diagonal_segments``).
         """
 
         stations = self.station_positions()
@@ -386,6 +440,11 @@ class Model:
                 for bx in buttock_xs:
                     dxf.add_grid_polyline([(bx, bottom_y), (bx, top_y)])
                     dxf.text((bx + 1, top_y - 2), name)
+
+        for name, segments in (body_diagonals or {}).items():
+            for p0, p1 in segments:
+                dxf.add_grid_polyline([p0, p1])
+                dxf.text((p1[0] + 1, p1[1] + 1), name)
 
         # draw station lines
         bottom_y, top_y = self.drawing_area_vertical_borders()
@@ -457,6 +516,18 @@ class Model:
         points = []
 
         for pp in body_points:
+            if isinstance(pp, DiagonalPoint):
+                try:
+                    distance = self._offset_at(
+                        self.breadth_line_to_index(pp.row), station_id, pp.row, False
+                    )
+                except ValueError:
+                    if not skip_missing:
+                        raise
+                    continue
+                x, y = pp.point(distance)
+                points.append((x, y, pp.row, pp.row))
+                continue
             if type(pp) is tuple:
                 breadth_line, height_line = pp
             else:
@@ -486,7 +557,11 @@ class Model:
         the name of the table row or the number (inches) of the point.
         """
         points = self._body_point_sources(
-            station_id, list(body_points) + self.waterline_body_points(), True
+            station_id,
+            list(body_points)
+            + self.waterline_body_points()
+            + self.diagonal_body_points(),
+            True,
         )
         points.sort(key=lambda pt: -pt[1])
         return points
@@ -553,6 +628,10 @@ class Model:
                 align="center",
                 height=text_height,
             )
+        for name, segments in self.diagonal_segments().items():
+            for p0, p1 in segments:
+                dxf.add_grid_polyline([p0, p1])
+                dxf.text((p1[0] + 1, p1[1] + 1), name, height=text_height)
         dxf.add_red_polyline([(x, y) for x, y, _, _ in points])
         for n, (x, y, breadth_src, height_src) in enumerate(points, 1):
             dxf.text(
@@ -571,6 +650,7 @@ class Model:
         gap: float = 24.0,
         sides: str = None,
         bow_station: str = None,
+        keel_link: bool = True,
     ):
         """Return ``{station: [polyline, ...]}``: the body lines of every station.
 
@@ -597,6 +677,10 @@ class Model:
 
         ``bow_station`` - overrides ``set_bow_station`` for this call.
 
+        ``keel_link`` - join the lowest point of every body line (the keel) to
+        the centerline with a horizontal segment (a point (0, y) is appended
+        unless the lowest point is already on the centerline).
+
         ``placement`` - where the centerline of the body plan is put along x
         (heights are the same as in the profile view, so y is not changed):
 
@@ -617,7 +701,11 @@ class Model:
                 "unknown sides %r, expected one of %s" % (sides, self.BODY_SIDES)
             )
 
-        body_points = list(body_points) + self.waterline_body_points()
+        body_points = (
+            list(body_points)
+            + self.waterline_body_points()
+            + self.diagonal_body_points()
+        )
 
         positions = self.station_positions()
         if bow_station is None:
@@ -625,9 +713,19 @@ class Model:
         if bow_station is not None and bow_station not in positions:
             raise KeyError("unknown station: %r" % (bow_station,))
         halves = {}
+        # the first body point is the sheer, the rabbet is given by
+        # rabbet_body_point(); a station without it (an empty cell) has no
+        # such point
+        sheer_points = self._station_points(positions, body_points[:1])
+        rabbet = self.rabbet_body_point()
+        rabbet_points = self._station_points(positions, [rabbet] if rabbet else [])
+        keel = self.keel_body_point()
+        keel_points = self._station_points(positions, [keel] if keel else [])
         for station in positions:
             poly = self.loft_body_line(station, body_points, skip_missing=True)
             poly.sort(key=lambda pt: -pt[1])
+            if keel_link and poly and poly[-1][0] != 0:
+                poly.append((0.0, poly[-1][1]))
             halves[station] = poly
 
         widest = None
@@ -641,12 +739,15 @@ class Model:
             return [(-x, y) for x, y in poly]
 
         lines = {}
+        flags = {}  # station: (drawn on the left, drawn on the right)
         for station, poly in halves.items():
             if not poly:
                 lines[station] = []
             elif sides == "half":
+                flags[station] = (False, True)
                 lines[station] = [poly]
             elif sides == "both":
+                flags[station] = (True, True)
                 left = mirrored(poly)[::-1]
                 if poly[-1][0] == 0:
                     left = left[1:]  # do not repeat a point on the centerline
@@ -665,11 +766,16 @@ class Model:
                 else:
                     right_side = forward
                     left_side = not forward
+                flags[station] = (left_side, right_side)
                 lines[station] = []
                 if left_side:
                     lines[station].append(mirrored(poly))
                 if right_side:
                     lines[station].append(poly)
+
+        sheer = self._joined_points(sheer_points, flags, positions)
+        rabbet = self._joined_points(rabbet_points, flags, positions)
+        keel = self._joined_points(keel_points, flags, positions)
 
         x0 = self.body_plan_origin_x(lines, placement, gap, widest)
         self.body_plan_centerline_x = x0
@@ -678,7 +784,58 @@ class Model:
                 s: [[(x + x0, y) for x, y in p] for p in polys]
                 for s, polys in lines.items()
             }
+            sheer = [[(x + x0, y) for x, y in p] for p in sheer]
+            rabbet = [[(x + x0, y) for x, y in p] for p in rabbet]
+            keel = [[(x + x0, y) for x, y in p] for p in keel]
+        result = BodyLines(lines)
+        result.sheer = sheer
+        result.rabbet = rabbet
+        result.keel = keel
+        return result
+
+    def _station_points(self, positions: dict, body_points: list) -> dict:
+        """``{station: (breadth, height)}`` of the one point in ``body_points``
+        (a list of at most one item) for the stations that have it in the
+        table."""
+        points = {}
+        if body_points:
+            for station in positions:
+                pt = self.loft_body_line(station, body_points, skip_missing=True)
+                if pt:
+                    points[station] = pt[0]
+        return points
+
+    @staticmethod
+    def _joined_points(points: dict, flags: dict, positions: dict) -> list:
+        """Join the points of the consecutive stations (``{station: (x, y)}``)
+        into one polyline per side of the centerline: ``flags`` is ``{station:
+        (drawn on the left, drawn on the right)}``. Returns up to two
+        polylines of at least two points."""
+        lines = []
+        for side in (0, 1):
+            pts = [
+                (-points[s][0] if side == 0 else points[s][0], points[s][1])
+                for s in sorted(points, key=lambda st: positions[st])
+                if flags.get(s, (False, False))[side]
+            ]
+            if len(pts) > 1:
+                lines.append(pts)
         return lines
+
+    def keel_body_point(self):
+        """(virtual) The ``(breadth, height)`` point of a body line (as an
+        item of ``body_points``) that is the keel, or None if the hull has no
+        keel line. Its points of the consecutive stations make the keel line
+        of the body plan. (Not to be confused with ``keel_link``, which joins
+        the lowest point of a body line to the centerline.)"""
+        return None
+
+    def rabbet_body_point(self):
+        """(virtual) The ``(breadth, height)`` point of a body line (as an
+        item of ``body_points``) that is the rabbet, or None if the hull has
+        no rabbet line. Its points of the consecutive stations make the rabbet
+        line of the body plan."""
+        return None
 
     @staticmethod
     def body_plan_sides(placement: str, sides: str = None):
@@ -716,12 +873,63 @@ class Model:
             "profile_end_x": max(xs) + margin,
             "body_centerline": (cl, min(ys) - margin, max(ys) + margin),
             "body_buttocks": buttocks,
+            "body_diagonals": self.diagonal_segments(cl, sides != "half"),
         }
 
-    def plot_body_lines(self, dxf: object, lines: dict, labels: bool = True):
+    def plot_body_plan_grid(self, dxf: object, lines: dict, margin: float = 12.0):
+        """Draw the grid of a body plan alone (no profile view) into ``dxf``:
+        the base line, the waterlines (``waterlines_positions``) with their
+        names, the vertical centerline ``CL``, the buttock lines
+        (``buttocks_positions``) and the diagonals (``diagonals_positions``). ``lines`` is as returned by
+        ``loft_body_lines`` (its centerline is ``body_plan_centerline_x``). The
+        buttocks are drawn on both sides of the centerline if any body line is
+        to the left of it, otherwise on the right only.
+        """
+        polylines = self.body_polylines(lines)
+        if not polylines or self.body_plan_centerline_x is None:
+            return
+        cl = self.body_plan_centerline_x
+        xs = [x for p in polylines for x, _ in p]
+        ys = [y for p in polylines for _, y in p]
+        waterlines = self.waterlines_positions()
+        base_y = self.grid_y_origins()[0]
+        left = min(xs + [cl]) - margin
+        right = max(xs + [cl]) + margin
+        bottom = min(ys + [base_y]) - margin
+        top = max(ys + list(waterlines.values())) + margin
+
+        for name, y in [("baseline", base_y)] + list(waterlines.items()):
+            dxf.add_grid_polyline([(left, y), (right, y)])
+            dxf.text((left + 1, y + 1), name)
+            dxf.text((right - 1, y + 1), name, align="right")
+
+        dxf.add_grid_polyline([(cl, bottom), (cl, top)])
+        dxf.text((cl + 1, top - 2), "CL")
+        both = min(xs) < cl
+        for name, offset in self.buttocks_positions().items():
+            for bx in [cl + offset] + ([cl - offset] if both else []):
+                dxf.add_grid_polyline([(bx, bottom), (bx, top)])
+                dxf.text((bx + 1, top - 2), name)
+        for name, segments in self.diagonal_segments(cl, both).items():
+            for p0, p1 in segments:
+                dxf.add_grid_polyline([p0, p1])
+                dxf.text((p1[0] + 1, p1[1] + 1), name)
+
+    def plot_body_lines(
+        self,
+        dxf: object,
+        lines: dict,
+        labels: bool = True,
+        sheer: bool = True,
+        rabbet: bool = True,
+        keel: bool = True,
+    ):
         """Draw the body lines (as returned by ``loft_body_lines``) into
         ``dxf``. With ``labels`` the station name is written above the top end
-        of every body line.
+        of every body line. With ``sheer`` the sheer line is drawn too, see
+        ``body_sheer_polylines``, with ``rabbet`` the rabbet line, see
+        ``body_rabbet_polylines``, with ``keel`` the keel line, see
+        ``body_keel_polylines``.
         """
         for station, polys in lines.items():
             for poly in polys:
@@ -732,6 +940,42 @@ class Model:
                     # the highest point; the polylines run from the top down
                     x, y = max(poly, key=lambda pt: pt[1])
                     dxf.text((x, y + 1), station, align="center")
+        if sheer:
+            for poly in self.body_sheer_polylines(lines):
+                dxf.add_red_polyline(poly)
+        if rabbet:
+            for poly in self.body_rabbet_polylines(lines):
+                dxf.add_red_polyline(poly)
+        if keel:
+            for poly in self.body_keel_polylines(lines):
+                dxf.add_red_polyline(poly)
+
+    def body_sheer_polylines(self, lines: dict):
+        """The sheer line of a body plan (``lines`` as returned by
+        ``loft_body_lines``): the sheer points of the consecutive stations
+        joined by a polyline, one polyline per side of the centerline: up to
+        two for ``sides="split"`` or ``"both"``, one for ``"half"``. The sheer
+        point is the first of the ``body_points``; a station whose table cell
+        for it is empty is skipped. Returns ``[polyline, ...]``, each with at
+        least 2 points.
+        """
+        return list(getattr(lines, "sheer", ()))
+
+    def body_rabbet_polylines(self, lines: dict):
+        """The rabbet line of a body plan (``lines`` as returned by
+        ``loft_body_lines``): the rabbet points (``rabbet_body_point``) of the
+        consecutive stations joined by a polyline, one per side of the
+        centerline, as ``body_sheer_polylines``. Empty if the model has no
+        rabbet."""
+        return list(getattr(lines, "rabbet", ()))
+
+    def body_keel_polylines(self, lines: dict):
+        """The keel line of a body plan (``lines`` as returned by
+        ``loft_body_lines``): the keel points (``keel_body_point``) of the
+        consecutive stations joined by a polyline, one per side of the
+        centerline, as ``body_sheer_polylines``. Empty if the model has no
+        keel point."""
+        return list(getattr(lines, "keel", ()))
 
     @staticmethod
     def body_polylines(lines: dict):
@@ -774,6 +1018,65 @@ class Model:
             if self.waterline_row(name) in rows
         ]
 
+    def diagonal_segments(self, centerline_x: float = 0.0, both: bool = False):
+        """The diagonals as line segments for drawing: ``{name: [((x, y),
+        (x, y)), ...]}``, from ``(centerline_x, y0)`` to the second point of
+        the diagonal, plus the mirror image about the centerline if ``both``.
+        """
+        segments = {}
+        for name, (y0, x1, y1) in self.diagonals_positions().items():
+            segments[name] = [((centerline_x, y0), (centerline_x + x1, y1))]
+            if both:
+                segments[name].append(((centerline_x, y0), (centerline_x - x1, y1)))
+        return segments
+
+    def loft_diagonal_plan_lines(self, origin_y: float = None):
+        """The diagonals in the plan view: ``{name: polyline}``, one point per
+        station that has the diagonal in the table. x is the station position;
+        the half-breadth of the hull point of the diagonal (see
+        ``DiagonalPoint``) is drawn *below* the centerline of the plan view,
+        i.e. y = ``origin_y`` - half-breadth, opposite to the waterlines and
+        the sheer, which are above it.
+
+        ``origin_y`` - the y of the plan view centerline; the default is the
+        second of ``grid_y_origins()`` (0 if there is only one).
+        """
+        if origin_y is None:
+            origins = self.grid_y_origins()
+            origin_y = origins[1] if len(origins) > 1 else 0.0
+        positions = self.station_positions()
+        names = {self.diagonal_row(name): name for name in self.diagonals_positions()}
+        lines = {}
+        for point in self.diagonal_body_points():
+            points = self._station_points(positions, [point])
+            poly = [
+                (positions[s], origin_y - points[s][0])
+                for s in positions
+                if s in points
+            ]
+            if poly:
+                lines[names[point.row]] = poly
+        return lines
+
+    def plot_diagonal_plan_lines(self, dxf: object, labels: bool = True):
+        """Draw ``loft_diagonal_plan_lines`` into ``dxf``; with ``labels`` the
+        name of the diagonal is written at the first point."""
+        for name, poly in self.loft_diagonal_plan_lines().items():
+            dxf.add_red_polyline(poly)
+            if labels:
+                dxf.text((poly[0][0] + 1, poly[0][1] - 3), name)
+
+    def diagonal_body_points(self) -> list:
+        """The diagonals as points of a body line: a ``DiagonalPoint`` for
+        every diagonal of ``diagonals_positions`` that has its row
+        (``diagonal_row``) in the table."""
+        rows = set(self._too["#"])
+        return [
+            DiagonalPoint(self.diagonal_row(name), y0, x1, y1)
+            for name, (y0, x1, y1) in self.diagonals_positions().items()
+            if self.diagonal_row(name) in rows
+        ]
+
     def line_to_index(self, line_id: str) -> int:
         """Return the row index of the line named line_id (the "#" column)"""
         names = list(self._too["#"])
@@ -803,9 +1106,7 @@ class Model:
         if not vertical:
             # base_offset() positions lines on the drawing sheet (vertical only)
             return value
-        return self.offset_sign(station_id, line_id) * value + self.base_offset(
-            line_id
-        )
+        return self.offset_sign(station_id, line_id) * value + self.base_offset(line_id)
 
     def breadth_at(self, station_id: str, line_id: str) -> float:
         """returns the half-breadth (inches) at the given station_id at the given line_id
@@ -939,6 +1240,4 @@ class DXF:
         }[align]
         self._msp.add_text(
             txt, height=height * self._scale, dxfattribs={"layer": "text"}
-        ).set_placement(
-            (xy[0] * self._scale, xy[1] * self._scale), align=alignment
-        )
+        ).set_placement((xy[0] * self._scale, xy[1] * self._scale), align=alignment)
