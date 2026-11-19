@@ -593,7 +593,11 @@ class Model:
         (``buttocks_positions``) as vertical lines with their names on the top.
 
         ``text_height`` is the height of the labels of the grid, ``point_text_height``
+        the height of the point labels (default ``text_height``).
         """
+        points = self.loft_body_line_sources(station_id, body_points)
+        if not points:
+            return
         if point_text_height is None:
             point_text_height = text_height
 
