@@ -27,10 +27,37 @@ class Test_Project89BodyLines(unittest.TestCase):
             heights = [y for _, y in poly]
             self.assertEqual(sorted(heights, reverse=True), heights, station)
         # 13 points, the D1-D3 points, the keel point (the "and" cell of the
-        # Profile Plan, first value) and the link from the keel to the
-        # centerline
-        self.assertEqual(18, len(lines["18"][0]))
+        # Profile Plan, first value), the ghost point (its second value) and
+        # the link from the keel to the centerline
+        self.assertEqual(19, len(lines["18"][0]))
         self.assertEqual(self.project.body_plan_centerline_x, lines["18"][0][-1][0])
+
+    def test_ghost_line(self):
+        """the ghost line is in the plan view (the second values of the Profile
+        Plan above the base line of the plan, like a waterline), in the profile
+        view (a horizontal segment at -51" over the stations 20-16) and in the
+        body lines (the second values of
+        the Profile Plan: 3.0, 4.75 and 5.0 at the stations 20, 18 and 16)"""
+        self.assertEqual(
+            [(156, 123.0), (180, 124.75), (204, 125.0)],
+            self.project.loft_ghost_plan_line(),
+        )
+        self.assertEqual(
+            [(156, -51.0), (204, -51.0)], self.project.loft_ghost_profile_line()
+        )
+        lines = self.project.body_lines("raw", "half")
+        cl = self.project.body_plan_centerline_x
+        for station, breadth in (("20", 3.0), ("18", 4.75), ("16", 5.0)):
+            self.assertIn((cl + breadth, -51.0), lines[station][0], station)
+        for station in ("14", "22"):  # no second value
+            # (the keel of the station 14 is at -51 too, on the centerline)
+            self.assertEqual(
+                [], [x for x, y in lines[station][0] if y == -51.0 and x > cl], station
+            )
+        sources = self.project.loft_body_line_sources(
+            "18", self.project.body_points()
+        )
+        self.assertIn((4.75, -51.0, "Profile Plan (2nd)", -51.0), sources)
 
     def test_default_sides(self):
         model = table_of_offsets.Model

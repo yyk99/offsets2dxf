@@ -22,11 +22,11 @@ Assumptions (not in the table):
 
 Run: ``python3 project_ferrocement.py [--out-dir DIR] [--output-units UNIT]`` writes, into ./out (in
 the current directory) or DIR,
-test_project_ferrocement.dxf (everything), test_project_ferrocement_body_right.dxf
+tutorial_project_ferrocement.dxf (everything), tutorial_project_ferrocement_body_right.dxf
 (body plan to the right of the profile view),
-test_project_ferrocement_body_split.dxf (aft/forward halves) and
-test_project_ferrocement_body.dxf (body lines only) and
-test_project_ferrocement_station6.dxf (the body line of the station 6 with
+tutorial_project_ferrocement_body_split.dxf (aft/forward halves) and
+tutorial_project_ferrocement_body.dxf (body lines only) and
+tutorial_project_ferrocement_station6.dxf (the body line of the station 6 with
 the table rows the coordinates of every point come from).
 """
 
@@ -212,21 +212,21 @@ if __name__ == "__main__":
 
     proj = ProjectFerrocement()
     proj.set_output_unit(args.output_units)
-    proj.save_model_as(out("test_project_ferrocement.dxf"))
-    print("Saved as:", out("test_project_ferrocement.dxf"))
+    proj.save_model_as(out("tutorial_project_ferrocement.dxf"))
+    print("Saved as:", out("tutorial_project_ferrocement.dxf"))
     # the body plan to the right of the profile view, clear of it
     proj.save_model_as(
-        out("test_project_ferrocement_body_right.dxf"), body_placement="right"
+        out("tutorial_project_ferrocement_body_right.dxf"), body_placement="right"
     )
     # the usual body plan: aft stations left, forward stations right
     proj.save_model_as(
-        out("test_project_ferrocement_body_split.dxf"),
+        out("tutorial_project_ferrocement_body_split.dxf"),
         body_placement="right",
         body_sides="split",
     )
-    proj.save_body_lines_as(out("test_project_ferrocement_body.dxf"))
+    proj.save_body_lines_as(out("tutorial_project_ferrocement_body.dxf"))
     # one station, every point labelled with the source of its coordinates
-    proj.save_station_as(out("test_project_ferrocement_station6.dxf"), "6")
-    print("Saved as:", out("test_project_ferrocement_body.dxf"))
+    proj.save_station_as(out("tutorial_project_ferrocement_station6.dxf"), "6")
+    print("Saved as:", out("tutorial_project_ferrocement_body.dxf"))
 
 # end of file

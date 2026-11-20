@@ -200,6 +200,18 @@ class DiagonalPoint:
         return (distance * self._ux, self.y0 + distance * self._uy)
 
 
+class GhostPoint:
+    """A point of a body line on the "ghost line": the half-breadth is the
+    second value of a table cell ``offset1 and offset2`` of the row ``row``,
+    the height is ``height`` (inches above the base line). A station whose cell
+    has no second value has no such point. It can be used as an item of
+    ``body_points`` (see ``Model.ghost_line``)."""
+
+    def __init__(self, row: str, height: float):
+        self.row = row
+        self.height = height
+
+
 class BodyLines(dict):
     """The result of ``Model.loft_body_lines``: ``{station: [polyline, ...]}``
     with the attributes ``sheer``, ``rabbet`` and ``keel``, the sheer line, the
@@ -564,6 +576,11 @@ class Model:
                 x, y = pp.point(distance)
                 points.append((x, y, pp.row, pp.row))
                 continue
+            if isinstance(pp, GhostPoint):
+                x = self.second_offset_at(station_id, pp.row)
+                if x is not None:
+                    points.append((x, pp.height, pp.row + " (2nd)", pp.height))
+                continue
             if type(pp) is tuple:
                 breadth_line, height_line = pp
             else:
@@ -596,7 +613,8 @@ class Model:
             station_id,
             list(body_points)
             + self.waterline_body_points()
-            + self.diagonal_body_points(),
+            + self.diagonal_body_points()
+            + self.ghost_body_points(),
             True,
         )
         points.sort(key=lambda pt: -pt[1])
@@ -747,6 +765,7 @@ class Model:
             list(body_points)
             + self.waterline_body_points()
             + self.diagonal_body_points()
+            + self.ghost_body_points()
         )
 
         positions = self.station_positions()
@@ -1138,6 +1157,68 @@ class Model:
             for name, (y0, x1, y1) in self.diagonals_positions().items()
             if self.diagonal_row(name) in rows
         ]
+
+    def second_offset_at(self, station_id: str, line_id: str):
+        """The second value of a cell ``offset1 and offset2`` of the row
+        ``line_id`` at ``station_id`` in inches (breadth, no sign and no
+        ``base_offset``), or ``None`` if the cell is empty or has one value."""
+        if station_id not in self._too.columns:
+            raise KeyError("unknown station: %r" % (station_id,))
+        offset = self._too.loc[self.breadth_line_to_index(line_id), station_id]
+        if type(offset) is not str:
+            return None
+        values = MULTI_VALUE_SEPARATOR.split(offset.strip())
+        if len(values) < 2:
+            return None
+        return offset_to_inches(values[1], self._unit)
+
+    def ghost_line(self):
+        """(virtual) The "ghost line": ``(row, height)`` or ``None`` (default,
+        no ghost line). It is at ``height`` inches above the base line, like a
+        waterline, from the first to the last station that has a second value
+        in the cells ``offset1 and offset2`` of the table row ``row``. It is
+        drawn in the profile view (``loft_ghost_profile_line``) and in the body
+        lines (``ghost_body_points``: a point at every station that has a
+        second value) and in the plan view (``loft_ghost_plan_line``)."""
+        return None
+
+    def ghost_body_points(self) -> list:
+        """The ghost line as points of a body line: ``[GhostPoint]``, empty
+        without a ghost line."""
+        ghost = self.ghost_line()
+        return [GhostPoint(*ghost)] if ghost else []
+
+    def loft_ghost_plan_line(self) -> list:
+        """The ghost line in the plan view: ``[(x, y), ...]``, x the station
+        position, y the half-breadth (the second value) shifted by
+        ``base_offset(row)``, like a waterline. Empty without a ghost line;
+        stations without a second value are skipped."""
+        ghost = self.ghost_line()
+        if not ghost:
+            return []
+        row = ghost[0]
+        poly = []
+        for station, x in self.station_positions().items():
+            breadth = self.second_offset_at(station, row)
+            if breadth is not None:
+                poly.append((x, breadth + self.base_offset(row)))
+        return sorted(poly)
+
+    def loft_ghost_profile_line(self) -> list:
+        """The ghost line in the profile view: ``[(x, y), (x, y)]``, a
+        horizontal segment at the height of the ghost line over the stations
+        that have a second value in the row. Empty without a ghost line or
+        without second values."""
+        ghost = self.ghost_line()
+        if not ghost:
+            return []
+        row, height = ghost
+        xs = [
+            x
+            for station, x in self.station_positions().items()
+            if self.second_offset_at(station, row) is not None
+        ]
+        return [(min(xs), height), (max(xs), height)] if xs else []
 
     def line_to_index(self, line_id: str) -> int:
         """Return the row index of the line named line_id (the "#" column)"""

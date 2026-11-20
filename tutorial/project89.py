@@ -17,11 +17,11 @@ body lines in the middle of the profile view, ``"right"`` puts them to the
 right of it.
 
 Run: ``python3 project89.py [--out-dir DIR] [--output-units UNIT]`` writes, into ./out (in the
-current directory) or DIR, test_project89.dxf (everything),
-test_project89_body_right.dxf (body plan to the right),
-test_project89_body_split.dxf (aft/forward halves) and
-test_project89_body.dxf (body lines only) and
-test_project89_station14.dxf, _station16.dxf and _station18.dxf (the body line
+current directory) or DIR, tutorial_project89.dxf (everything),
+tutorial_project89_body_right.dxf (body plan to the right),
+tutorial_project89_body_split.dxf (aft/forward halves) and
+tutorial_project89_body.dxf (body lines only) and
+tutorial_project89_station14.dxf, _station16.dxf and _station18.dxf (the body line
 of the station with every point labelled).
 """
 
@@ -123,6 +123,12 @@ class Project89(table_of_offsets.Model):
     def diagonal_row(self, name: str) -> str:
         return {"D1": "Diagonal 1", "D2": "D 2", "D3": "D 3"}.get(name, name)
 
+    def ghost_line(self):
+        """The ghost line (plan view, profile view and body lines): at the height -51" (4-3-0 below
+        the LWL, the Profile at station 14), over the stations 20-16, which
+        have the second values of the "and" cells of the Profile Plan."""
+        return ("Profile Plan", -51.0)
+
     def keel_body_point(self):
         return ("Profile Plan", "Profile")
 
@@ -205,6 +211,11 @@ class Project89(table_of_offsets.Model):
             dxf.add_red_polyline(self.loft_line_n(11))
             dxf.add_red_polyline(self.loft_line_n(12))
 
+            # the ghost line: plan view, profile view (the body lines have it
+            # as points)
+            dxf.add_red_polyline(self.loft_ghost_plan_line())
+            dxf.add_red_polyline(self.loft_ghost_profile_line())
+
             # the diagonals in the plan view, below the plan centerline
             self.plot_diagonal_plan_lines(dxf)
 
@@ -220,21 +231,21 @@ if __name__ == "__main__":
 
     proj = Project89()
     proj.set_output_unit(args.output_units)
-    proj.save_model_as(out("test_project89.dxf"))
-    print("Saved as:", out("test_project89.dxf"))
+    proj.save_model_as(out("tutorial_project89.dxf"))
+    print("Saved as:", out("tutorial_project89.dxf"))
     # option 2: the body plan to the right of the profile view, clear of it
-    proj.save_model_as(out("test_project89_body_right.dxf"), body_placement="right")
+    proj.save_model_as(out("tutorial_project89_body_right.dxf"), body_placement="right")
     # the usual body plan: aft stations left, forward stations right
     proj.save_model_as(
-        out("test_project89_body_split.dxf"),
+        out("tutorial_project89_body_split.dxf"),
         body_placement="right",
         body_sides="split",
     )
-    proj.save_body_lines_as(out("test_project89_body.dxf"))
-    print("Saved as:", out("test_project89_body.dxf"))
+    proj.save_body_lines_as(out("tutorial_project89_body.dxf"))
+    print("Saved as:", out("tutorial_project89_body.dxf"))
     # the body line of single stations, every point labelled
     for station in ("14", "16", "18"):
-        filename = out("test_project89_station%s.dxf" % station)
+        filename = out("tutorial_project89_station%s.dxf" % station)
         proj.save_station_as(filename, station)
         print("Saved as:", filename)
 
