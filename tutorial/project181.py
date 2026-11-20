@@ -6,9 +6,9 @@ are the "Sheerline", "... LL", "... DL" and "Rabbet Line" rows. The diagonals D1
 half-breadth in the table: its body line points use that of the "Rabbet Line".
 
 Run: ``python3 project181.py [--out-dir DIR] [--output-units UNIT]`` -> writes, into ./out (in the
-current directory) or DIR, test_project181.dxf (everything, body lines in the middle of the profile
-view) and test_project181_body.dxf (body lines only) and
-test_project181_station1.dxf, _station4.dxf, _station5.dxf and _station8.dxf (the body line
+current directory) or DIR, tutorial_project181.dxf (everything, body lines in the middle of the profile
+view) and tutorial_project181_body.dxf (body lines only) and
+tutorial_project181_station1.dxf, _station4.dxf, _station5.dxf and _station8.dxf (the body line
 of the station with every point labelled).
 """
 
@@ -198,17 +198,17 @@ if __name__ == "__main__":
 
     print(proj.station_positions())
 
-    filename = os.path.join(out_dir, "test_project181.dxf")
+    filename = os.path.join(out_dir, "tutorial_project181.dxf")
     proj.save_model_as(filename)
     print("Saved as:", filename)
 
-    filename = os.path.join(out_dir, "test_project181_body.dxf")
+    filename = os.path.join(out_dir, "tutorial_project181_body.dxf")
     proj.save_body_lines_as(filename)
     print("Saved as:", filename)
 
     # one station, every point labelled with the source of its coordinates
     for station in ("1", "4", "5", "8"):
-        filename = os.path.join(out_dir, "test_project181_station%s.dxf" % station)
+        filename = os.path.join(out_dir, "tutorial_project181_station%s.dxf" % station)
         proj.save_station_as(filename, station)
         print("Saved as:", filename)
 

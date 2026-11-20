@@ -39,7 +39,7 @@ directory (git-ignored, created if needed). Use `--out-dir DIR` to write
 somewhere else (a relative `DIR` is relative to the current directory):
 
     cd tutorial
-    python3 projectbluemoon.py      # -> tutorial/out/test_project_blue_moon*.dxf
+    python3 projectbluemoon.py      # -> tutorial/out/tutorial_project_blue_moon*.dxf
     python3 project89.py --out-dir /tmp/dxf
 
 Run the tests:

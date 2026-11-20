@@ -24,6 +24,7 @@ Classes:
 import argparse
 import math
 import os
+import re
 
 import ezdxf
 import ezdxf.entities
@@ -137,8 +138,23 @@ TableOfOffsets.UNITS = {
 OUTPUT_UNITS = ("inch", "ft", "mm", "cm", "m")
 
 
-def offset_to_inches(value: str, unit: str = "ftin") -> float:
+# What to do with a cell that holds several values ("0-2-0 and 0-3-0"):
+# "error" (default) - the cell is malformed (ValueError), "first" - use the
+# first value.
+MULTI_VALUE_POLICIES = ("error", "first")
+
+# the separator of the values in such a cell
+MULTI_VALUE_SEPARATOR = re.compile(r"\s+and\s+")
+
+
+def offset_to_inches(
+    value: str, unit: str = "ftin", multi_value: str = "error"
+) -> float:
     """Convert an offset from a table cell to inches.
+
+    multi_value - what to do with a cell of the form ``offset1 and offset2``,
+    one of ``MULTI_VALUE_POLICIES``: ``"error"`` (default) raises ValueError,
+    ``"first"`` uses ``offset1``.
 
     unit - one of ``TableOfOffsets.UNITS``: ``"ftin"`` (default) is the
     ``feet-inches-eighths`` notation, the others are plain numbers, e.g.
@@ -149,6 +165,13 @@ def offset_to_inches(value: str, unit: str = "ftin") -> float:
         raise ValueError(
             "unknown unit %r, expected one of %s" % (unit, list(TableOfOffsets.UNITS))
         )
+    if multi_value not in MULTI_VALUE_POLICIES:
+        raise ValueError(
+            "unknown multi_value policy %r, expected one of %s"
+            % (multi_value, list(MULTI_VALUE_POLICIES))
+        )
+    if multi_value == "first":
+        value = MULTI_VALUE_SEPARATOR.split(value.strip())[0]
     if unit == "ftin":
         return TableOfOffsets.offset2double(value)
     return float(value) * TableOfOffsets.UNITS[unit]
@@ -175,6 +198,18 @@ class DiagonalPoint:
     def point(self, distance: float):
         """``(breadth, height)`` of the point ``distance`` from ``(0, y0)``."""
         return (distance * self._ux, self.y0 + distance * self._uy)
+
+
+class GhostPoint:
+    """A point of a body line on the "ghost line": the half-breadth is the
+    second value of a table cell ``offset1 and offset2`` of the row ``row``,
+    the height is ``height`` (inches above the base line). A station whose cell
+    has no second value has no such point. It can be used as an item of
+    ``body_points`` (see ``Model.ghost_line``)."""
+
+    def __init__(self, row: str, height: float):
+        self.row = row
+        self.height = height
 
 
 class BodyLines(dict):
@@ -227,6 +262,7 @@ class Model:
                 % (unit, list(TableOfOffsets.UNITS))
             )
         self._unit = unit
+        self._multi_value = "error"
         self._filename_csv = _filename_csv
         # read the cells as text: the numbers are converted by offset_to_inches
         self._too = pandas.read_csv(self._filename_csv, dtype=str)
@@ -267,7 +303,19 @@ class Model:
 
     def offset_to_inches(self, value: str) -> float:
         """Convert a cell of the table to inches, using the unit of the table."""
-        return offset_to_inches(value, self._unit)
+        return offset_to_inches(value, self._unit, self._multi_value)
+
+    def set_multi_value_policy(self, policy: str):
+        """What to do with a cell that holds several values, ``offset1 and
+        offset2``: one of ``MULTI_VALUE_POLICIES``; ``"error"`` (default) makes
+        the point malformed (it is skipped where the cells are optional),
+        ``"first"`` uses ``offset1``."""
+        if policy not in MULTI_VALUE_POLICIES:
+            raise ValueError(
+                "unknown multi_value policy %r, expected one of %s"
+                % (policy, list(MULTI_VALUE_POLICIES))
+            )
+        self._multi_value = policy
 
     def set_output_unit(self, unit: str = None):
         """Set the unit of the coordinates in the .dxf files (``OUTPUT_UNITS``).
@@ -528,6 +576,11 @@ class Model:
                 x, y = pp.point(distance)
                 points.append((x, y, pp.row, pp.row))
                 continue
+            if isinstance(pp, GhostPoint):
+                x = self.second_offset_at(station_id, pp.row)
+                if x is not None:
+                    points.append((x, pp.height, pp.row + " (2nd)", pp.height))
+                continue
             if type(pp) is tuple:
                 breadth_line, height_line = pp
             else:
@@ -560,7 +613,8 @@ class Model:
             station_id,
             list(body_points)
             + self.waterline_body_points()
-            + self.diagonal_body_points(),
+            + self.diagonal_body_points()
+            + self.ghost_body_points(),
             True,
         )
         points.sort(key=lambda pt: -pt[1])
@@ -711,6 +765,7 @@ class Model:
             list(body_points)
             + self.waterline_body_points()
             + self.diagonal_body_points()
+            + self.ghost_body_points()
         )
 
         positions = self.station_positions()
@@ -1102,6 +1157,68 @@ class Model:
             for name, (y0, x1, y1) in self.diagonals_positions().items()
             if self.diagonal_row(name) in rows
         ]
+
+    def second_offset_at(self, station_id: str, line_id: str):
+        """The second value of a cell ``offset1 and offset2`` of the row
+        ``line_id`` at ``station_id`` in inches (breadth, no sign and no
+        ``base_offset``), or ``None`` if the cell is empty or has one value."""
+        if station_id not in self._too.columns:
+            raise KeyError("unknown station: %r" % (station_id,))
+        offset = self._too.loc[self.breadth_line_to_index(line_id), station_id]
+        if type(offset) is not str:
+            return None
+        values = MULTI_VALUE_SEPARATOR.split(offset.strip())
+        if len(values) < 2:
+            return None
+        return offset_to_inches(values[1], self._unit)
+
+    def ghost_line(self):
+        """(virtual) The "ghost line": ``(row, height)`` or ``None`` (default,
+        no ghost line). It is at ``height`` inches above the base line, like a
+        waterline, from the first to the last station that has a second value
+        in the cells ``offset1 and offset2`` of the table row ``row``. It is
+        drawn in the profile view (``loft_ghost_profile_line``) and in the body
+        lines (``ghost_body_points``: a point at every station that has a
+        second value) and in the plan view (``loft_ghost_plan_line``)."""
+        return None
+
+    def ghost_body_points(self) -> list:
+        """The ghost line as points of a body line: ``[GhostPoint]``, empty
+        without a ghost line."""
+        ghost = self.ghost_line()
+        return [GhostPoint(*ghost)] if ghost else []
+
+    def loft_ghost_plan_line(self) -> list:
+        """The ghost line in the plan view: ``[(x, y), ...]``, x the station
+        position, y the half-breadth (the second value) shifted by
+        ``base_offset(row)``, like a waterline. Empty without a ghost line;
+        stations without a second value are skipped."""
+        ghost = self.ghost_line()
+        if not ghost:
+            return []
+        row = ghost[0]
+        poly = []
+        for station, x in self.station_positions().items():
+            breadth = self.second_offset_at(station, row)
+            if breadth is not None:
+                poly.append((x, breadth + self.base_offset(row)))
+        return sorted(poly)
+
+    def loft_ghost_profile_line(self) -> list:
+        """The ghost line in the profile view: ``[(x, y), (x, y)]``, a
+        horizontal segment at the height of the ghost line over the stations
+        that have a second value in the row. Empty without a ghost line or
+        without second values."""
+        ghost = self.ghost_line()
+        if not ghost:
+            return []
+        row, height = ghost
+        xs = [
+            x
+            for station, x in self.station_positions().items()
+            if self.second_offset_at(station, row) is not None
+        ]
+        return [(min(xs), height), (max(xs), height)] if xs else []
 
     def line_to_index(self, line_id: str) -> int:
         """Return the row index of the line named line_id (the "#" column)"""
