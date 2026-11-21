@@ -36,6 +36,10 @@ Tutorial scripts (e.g. `tutorial/project89.py`) are run directly and write `.dxf
 ## TODO
 
 - Grid settings are still hard-coded in the projects 181, Blue Moon, Tabby Cat and ferrocement; move them to `.meta` files (see Meta data).
+- Units (to be done in a separate branch):
+  - the default station spacing of `Model.station_positions` (12) is in inches, while the lengths of a meta data file are in the unit of the table and are scaled to inches: in an `mm` table without `spacing` and `positions` the stations would be 12 inches apart, not 12 mm. Define the default per unit or require `spacing`/`positions`;
+  - the `$MEASUREMENT` header variable of the .dxf is always metric (1), also for inch output; set it from the output unit;
+  - `ftin` tables are written in inches (there is no `ftin` output unit in `OUTPUT_UNITS`); decide whether that is final and document it.
 - Detect inconsistencies in the offset tables and do extrapolations. The tables have defects that are clearly seen in the body line view, e.g. the Tabby Cat station 10 near the sheer and near buttock 1 (and station 1, which has no `Breadth Sheer`, so the sheer line skips it instead of using an extrapolated point). Idea: check the rows of every station against the neighbouring stations and the other views, report the suspicious cells, and fill the missing ones by extrapolation.
 - Ferrocement body lines (`tutorial/project_ferrocement.py`) look strange; left as is for now. Suspects, none verified:
   - the transcription of `sample_data/a_ferrocement_hull/offset_table.csv` has not been checked against the GIF (e.g. `Breadth WL 3` at station 3 is 774 after 124 at station 2);
