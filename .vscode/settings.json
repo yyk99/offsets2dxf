@@ -12,6 +12,10 @@
         "editor.defaultFormatter": "ms-python.black-formatter",
         "editor.formatOnSave": true
     },
+    "files.associations": {
+        "*.meta": "toml",
+        "*.grid": "toml"
+    },
     "cSpell.words": [
         "ezdxf",
         "modelspace",
