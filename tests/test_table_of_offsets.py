@@ -37,7 +37,8 @@ class Test_TableOfOffsets(unittest.TestCase):
 
     def test_Model(self):
         actual = table_of_offsets.Model(
-            os.path.join(source_directory, "sample_data/offset_table.csv")
+            os.path.join(source_directory, "sample_data/offset_table.csv"),
+            meta=False,
         )
         self.assertIsNotNone(actual._too)
 
@@ -47,31 +48,25 @@ class Test_TableOfOffsets(unittest.TestCase):
 
         actual_sheer = actual.loft_sheer()
         # print(sheer)
-        """
-        [
-            (12, 22.25), (36, 20.75), (60, 19.875), (84, 19.25), 
-            (108, 19.0), (132, 18.875), (156, 19.125), (180, 19.75), 
-            (204, 20.625), (228, 21.625), (252, 23.0), (276, 24.75), 
-            (300, 26.625), (324, 28.875), (348, 31.25), (372, 34.0), (396, 36.875)
-        ]"""
+        # the stations are equally spaced (12 in) in the order of the columns
         expected_sheer = [
             (12, 22.25),
-            (36, 20.75),
-            (60, 19.875),
-            (84, 19.25),
-            (108, 19.0),
-            (132, 18.875),
-            (156, 19.125),
-            (180, 19.75),
-            (204, 20.625),
-            (228, 21.625),
-            (252, 23.0),
-            (276, 24.75),
-            (300, 26.625),
-            (324, 28.875),
-            (348, 31.25),
-            (372, 34.0),
-            (396, 36.875),
+            (24, 20.75),
+            (36, 19.875),
+            (48, 19.25),
+            (60, 19.0),
+            (72, 18.875),
+            (84, 19.125),
+            (96, 19.75),
+            (108, 20.625),
+            (120, 21.625),
+            (132, 23.0),
+            (144, 24.75),
+            (156, 26.625),
+            (168, 28.875),
+            (180, 31.25),
+            (192, 34.0),
+            (204, 36.875),
         ]
 
         self.assertEqual(17, len(actual_sheer))
@@ -170,7 +165,7 @@ class Test_Units(unittest.TestCase):
 
     def test_model_unit(self):
         csv = os.path.join(source_directory, "sample_data", "offset_table.csv")
-        model = table_of_offsets.Model(csv)
+        model = table_of_offsets.Model(csv, meta=False)
         self.assertEqual("ftin", model.offsets_unit())
         self.assertEqual("inch", model.units())
         with self.assertRaises(ValueError):
@@ -221,7 +216,7 @@ class Test_OutputUnit(unittest.TestCase):
 
     def test_model_output_unit(self):
         csv = os.path.join(source_directory, "sample_data", "offset_table.csv")
-        model = table_of_offsets.Model(csv)  # ftin
+        model = table_of_offsets.Model(csv, meta=False)  # ftin
         self.assertEqual("inch", model.output_unit())  # the same as the input
         model.set_output_unit("mm")
         self.assertEqual("mm", model.output_unit())
@@ -259,7 +254,7 @@ class Test_WaterlineBodyPoints(unittest.TestCase):
 
     def setUp(self):
         csv = os.path.join(source_directory, "sample_data", "offset_table.csv")
-        self.model = self.Model(csv)
+        self.model = self.Model(csv, meta=False)
 
     def test_waterline_body_points(self):
         self.assertEqual(
@@ -289,7 +284,7 @@ class Test_WaterlineBodyPoints(unittest.TestCase):
         csv = os.path.join(source_directory, "sample_data", "offset_table.csv")
         # the breadth of "LWL" is taken from the row "Sheer"
         self.assertEqual(
-            [("Sheer", 0.0), ('WL + 6"', 6.0)], Renamed(csv).waterline_body_points()
+            [("Sheer", 0.0), ('WL + 6"', 6.0)], Renamed(csv, meta=False).waterline_body_points()
         )
 
 
@@ -308,11 +303,12 @@ class Test_Diagonals(unittest.TestCase):
 
     def setUp(self):
         csv = os.path.join(source_directory, "sample_data", "offset_table.csv")
-        self.model = self.Model(csv)
+        self.model = self.Model(csv, meta=False)
 
     def test_default_has_no_diagonals(self):
         model = table_of_offsets.Model(
-            os.path.join(source_directory, "sample_data", "offset_table.csv")
+            os.path.join(source_directory, "sample_data", "offset_table.csv"),
+            meta=False,
         )
         self.assertEqual({}, model.diagonals_positions())
         self.assertEqual([], model.diagonal_body_points())
@@ -425,7 +421,8 @@ class Test_BodyLine(unittest.TestCase):
 
     def setUp(self):
         self.model = table_of_offsets.Model(
-            os.path.join(source_directory, "sample_data", "offset_table.csv")
+            os.path.join(source_directory, "sample_data", "offset_table.csv"),
+            meta=False,
         )
 
     def test_breadth_at(self):

@@ -25,6 +25,7 @@ import argparse
 import math
 import os
 import re
+import tomllib
 
 import ezdxf
 import ezdxf.entities
@@ -177,6 +178,118 @@ def offset_to_inches(
     return float(value) * TableOfOffsets.UNITS[unit]
 
 
+# the extensions of a meta data file ("meta" and "grid" are synonyms)
+META_EXTENSIONS = (".meta", ".grid")
+
+# the sections of a meta data file and the keys of the plain ones
+_META_KEYS = {
+    "table": {"csv", "unit", "bow_station", "multi_value"},
+    "stations": {"origin", "spacing", "positions"},
+    "ghost_line": {"row", "height"},
+    "sheet": {"y_origins", "vertical_borders"},
+}
+# the sections with one entry per name
+_META_NAMED = {"waterlines", "buttocks", "diagonals"}
+_META_ENTRY_KEYS = {
+    "waterlines": {"height", "row"},
+    "diagonals": {"row", "from", "through"},
+}
+
+
+def find_meta(csv_path: str):
+    """The meta data file of a table: the CSV path with the extension replaced
+    by one of ``META_EXTENSIONS`` (``.meta`` or ``.grid``), or ``None`` if
+    there is none. Raises ValueError if both exist."""
+    stem = os.path.splitext(csv_path)[0]
+    found = [stem + e for e in META_EXTENSIONS if os.path.exists(stem + e)]
+    if len(found) > 1:
+        raise ValueError("more than one meta data file: %s" % ", ".join(found))
+    return found[0] if found else None
+
+
+def load_meta(path: str) -> dict:
+    """Read and check a meta data file (TOML, see
+    ``sample_data/offset_table.meta``) that describes the grid of a model:
+    ``[table]``, ``[stations]``, ``[waterlines]``, ``[buttocks]``,
+    ``[diagonals]``, ``[ghost_line]`` and ``[sheet]``. Lengths are in inches.
+    Raises ValueError for an unknown section or key or a malformed value."""
+    with open(path, "rb") as f:
+        try:
+            meta = tomllib.load(f)
+        except tomllib.TOMLDecodeError as e:
+            raise ValueError("%s: %s" % (path, e))
+
+    def bad(what):
+        return ValueError("%s: %s" % (path, what))
+
+    def number(value):
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+    for section, content in meta.items():
+        if section not in _META_KEYS and section not in _META_NAMED:
+            raise bad("unknown section [%s]" % section)
+        if not isinstance(content, dict):
+            raise bad("[%s] must be a table" % section)
+        if section in _META_KEYS:
+            unknown = set(content) - _META_KEYS[section]
+            if unknown:
+                raise bad("unknown key %r in [%s]" % (sorted(unknown)[0], section))
+    unit = meta.get("table", {}).get("unit", "ftin")
+    if unit not in TableOfOffsets.UNITS:
+        raise bad("unknown unit %r" % (unit,))
+    policy = meta.get("table", {}).get("multi_value", "error")
+    if policy not in MULTI_VALUE_POLICIES:
+        raise bad("unknown multi_value policy %r" % (policy,))
+    stations = meta.get("stations", {})
+    if "stations" in meta:
+        for key in ("origin", "spacing"):
+            if key in stations and not number(stations[key]):
+                raise bad("[stations] %s must be a number" % key)
+        positions = stations.get("positions")
+        if positions is not None and not (
+            isinstance(positions, dict) and all(map(number, positions.values()))
+        ):
+            raise bad("[stations] positions must be {station = x, ...} (numbers)")
+        if "spacing" not in stations and not positions:
+            raise bad("[stations] needs spacing or positions")
+    for name, value in meta.get("buttocks", {}).items():
+        if not number(value):
+            raise bad("buttock %r must be a number" % name)
+    for section in ("waterlines", "diagonals"):
+        for name, entry in meta.get(section, {}).items():
+            if not isinstance(entry, dict):
+                raise bad("%s %r must be a table" % (section, name))
+            unknown = set(entry) - _META_ENTRY_KEYS[section]
+            if unknown:
+                raise bad("unknown key %r in %s %r" % (sorted(unknown)[0], section, name))
+    for name, entry in meta.get("waterlines", {}).items():
+        if not number(entry.get("height")):
+            raise bad("waterline %r needs a number height" % name)
+    for name, entry in meta.get("diagonals", {}).items():
+        for key in ("from", "through"):
+            point = entry.get(key)
+            if not (
+                isinstance(point, list) and len(point) == 2 and all(map(number, point))
+            ):
+                raise bad("diagonal %r: %s must be [x, y]" % (name, key))
+        if entry["from"][0] != 0:
+            raise bad("diagonal %r: from must be on the centerline [0, y0]" % name)
+    ghost = meta.get("ghost_line")
+    if ghost is not None and not (
+        isinstance(ghost.get("row"), str) and number(ghost.get("height"))
+    ):
+        raise bad("[ghost_line] needs a row and a number height")
+    sheet = meta.get("sheet", {})
+    for key in ("y_origins", "vertical_borders"):
+        if key in sheet and not (
+            isinstance(sheet[key], list) and all(map(number, sheet[key]))
+        ):
+            raise bad("[sheet] %s must be a list of numbers" % key)
+    if "vertical_borders" in sheet and len(sheet["vertical_borders"]) != 2:
+        raise bad("[sheet] vertical_borders must be [bottom, top]")
+    return meta
+
+
 class DiagonalPoint:
     """A point of a body line given by a diagonal: the table cell is the
     distance along the diagonal from its first point ``(0, y0)`` on the
@@ -248,21 +361,41 @@ class Model:
             dxf.add_red_polyline(boat.loft_line_n(0))
     """
 
-    def __init__(self: object, _filename_csv: str, unit: str = "ftin"):
+    def __init__(self: object, _filename_csv: str, unit: str = None, meta=None):
         """Load the table of offsets from ``_filename_csv``.
 
         unit - the unit of the offsets in the table, one of
-        ``TableOfOffsets.UNITS``: ``"ftin"`` (default, feet-inches-eighths),
+        ``TableOfOffsets.UNITS``: ``"ftin"`` (feet-inches-eighths),
         ``"inch"``, ``"ft"``, ``"mm"``, ``"cm"`` or ``"m"``. Everything the
-        model returns is in inches.
+        model returns is in inches. The default is the unit of the meta data
+        file, else ``"ftin"``.
+
+        meta - the meta data file that describes the grid (see ``load_meta``):
+        a path, ``None`` (default) for the file next to the CSV with the
+        extension ``.meta`` or ``.grid`` if there is one (``find_meta``), or
+        ``False`` for none. What it
+        gives (stations, waterlines, buttocks, diagonals, ghost line, sheet
+        layout, bow station, multi value policy) is the default of the
+        "(virtual)" methods, which a subclass still can override.
         """
+        if meta is None:
+            meta = find_meta(_filename_csv) or False
+        self._meta = load_meta(meta) if meta else {}
+        meta_table = self._meta.get("table", {})
+        if unit is None:
+            unit = meta_table.get("unit", "ftin")
+        elif "unit" in meta_table and unit != meta_table["unit"]:
+            raise ValueError(
+                "unit %r does not agree with the meta data file (%r)"
+                % (unit, meta_table["unit"])
+            )
         if unit not in TableOfOffsets.UNITS:
             raise ValueError(
                 "unknown unit %r, expected one of %s"
                 % (unit, list(TableOfOffsets.UNITS))
             )
         self._unit = unit
-        self._multi_value = "error"
+        self._multi_value = meta_table.get("multi_value", "error")
         self._filename_csv = _filename_csv
         # read the cells as text: the numbers are converted by offset_to_inches
         self._too = pandas.read_csv(self._filename_csv, dtype=str)
@@ -270,8 +403,9 @@ class Model:
         # x of the centerline of the body plan lofted last (loft_body_lines)
         self.body_plan_centerline_x = None
         self._bow_station = None
+        if "bow_station" in meta_table:
+            self.set_bow_station(meta_table["bow_station"])
         self._output_unit = None
-        pass
 
     def set_bow_station(self, station: str):
         """Tell which station is at the bow end, e.g. ``"1"`` or ``"0"``.
@@ -342,16 +476,35 @@ class Model:
     def station_positions(self):
         """(virtual) Return ``{station_name: x_position}`` for every station column.
 
-        The default suits the 33-station sample table: station ``s`` is at
-        ``(33 - s) * 12`` inches. Override it for other layouts.
+        Station names are just labels (``"1"``, ``"T"``, ``"AP"``, ``"1A"``);
+        the position of a station is derived from its place in the list of
+        the columns of the table: the n-th station (from 0) is at
+        ``origin + n * spacing`` inches. ``origin`` (default 0) and
+        ``spacing`` (default 12; may be negative, to number the stations from
+        the bow, whose x is the greater) are those of ``[stations]`` of the
+        meta data file. ``positions`` of ``[stations]`` gives the x of
+        stations by name, for tables whose stations are not equally spaced; the
+        others use ``origin`` and ``spacing``. Override this method for other
+        layouts. Raises ValueError for a station that has no position.
         """
+        stations = self._meta.get("stations", {})
+        explicit = stations.get("positions", {})
+        names = [c for c in self._too.columns if c != "#"]
+        unknown = [n for n in explicit if n not in names]
+        if unknown:
+            raise ValueError(
+                "[stations] positions: %r is not a station of the table" % unknown[0]
+            )
+        origin = stations.get("origin", 0)
+        spacing = stations.get("spacing", None if explicit else 12)
         station_positions = {}
-        for c in self._too.columns:
-            if c == "#":
-                pass
+        for n, c in enumerate(names):
+            if c in explicit:
+                station_positions[c] = float(explicit[c])
+            elif spacing is not None:
+                station_positions[c] = origin + n * spacing
             else:
-                assert c.isdecimal()
-                station_positions[c] = (33 - int(c)) * 12  # 1' == 12" (inches)
+                raise ValueError("no position for station %r" % (c,))
         return station_positions
 
     def buttocks_positions(self):
@@ -360,12 +513,20 @@ class Model:
         {
             "LWL" : 0,
         }
+        From ``[buttocks]`` of the meta data file, if any.
         """
+        if "buttocks" in self._meta:
+            return {k: float(v) for k, v in self._meta["buttocks"].items()}
         print("TODO: please define buttocks_positions()")
         return {}
 
     def waterlines_positions(self):
-        """(virtual) Return a dictionary"""
+        """(virtual) Return a dictionary: ``{name: height}``. From
+        ``[waterlines]`` of the meta data file, if any."""
+        if "waterlines" in self._meta:
+            return {
+                k: float(v["height"]) for k, v in self._meta["waterlines"].items()
+            }
         print("TODO: please define waterline_positions()")
         return {}
 
@@ -374,14 +535,18 @@ class Model:
         inches, heights above the base line. A diagonal is the straight line
         from the point ``(0, y0)`` on the centerline through the point
         ``(x1, y1)``; the table gives, per station, the distance along it from
-        ``(0, y0)`` to the hull. The default is no diagonals."""
-        return {}
+        ``(0, y0)`` to the hull. From ``[diagonals]`` of the meta data file;
+        the default is no diagonals."""
+        return {
+            name: (float(d["from"][1]), float(d["through"][0]), float(d["through"][1]))
+            for name, d in self._meta.get("diagonals", {}).items()
+        }
 
     def diagonal_row(self, name: str) -> str:
         """(virtual) The name of the table row with the distances of the
         diagonal ``name`` (a key of ``diagonals_positions``). The default is
         the same name."""
-        return name
+        return self._meta.get("diagonals", {}).get(name, {}).get("row", name)
 
     def offset_sign(self, station: str, line: str):
         """Returns either 1 or -1
@@ -526,12 +691,16 @@ class Model:
             dxf.text((max(xx) + 12 - 1, wl_y + 1), wl)
 
     def drawing_area_vertical_borders(self):
-        """(virtual) return (bottom, top)"""
-        return (-12 * 10, 12 * 10)
+        """(virtual) return (bottom, top); ``vertical_borders`` of ``[sheet]``
+        of the meta data file, if any"""
+        borders = self._meta.get("sheet", {}).get("vertical_borders")
+        return tuple(map(float, borders)) if borders else (-12 * 10, 12 * 10)
 
     def grid_y_origins(self):
-        """(virtual) returns y-coordinate list of the horizontal lines in the grid"""
-        return [0.0]
+        """(virtual) returns y-coordinate list of the horizontal lines in the
+        grid; ``y_origins`` of ``[sheet]`` of the meta data file, if any"""
+        origins = self._meta.get("sheet", {}).get("y_origins")
+        return [float(y) for y in origins] if origins else [0.0]
 
     def loft_body_line(
         self, station_id: str, body_points: list, skip_missing: bool = False
@@ -1064,8 +1233,8 @@ class Model:
     def waterline_row(self, name: str) -> str:
         """(virtual) The name of the table row with the half-breadths of the
         waterline ``name`` (a key of ``waterlines_positions``). The default is
-        the same name."""
-        return name
+        the same name (``row`` in ``[waterlines]`` of the meta data file)."""
+        return self._meta.get("waterlines", {}).get(name, {}).get("row", name)
 
     def waterline_body_points(self) -> list:
         """The waterlines as points of a body line: ``[(breadth_row, height)]``
@@ -1179,8 +1348,10 @@ class Model:
         in the cells ``offset1 and offset2`` of the table row ``row``. It is
         drawn in the profile view (``loft_ghost_profile_line``) and in the body
         lines (``ghost_body_points``: a point at every station that has a
-        second value) and in the plan view (``loft_ghost_plan_line``)."""
-        return None
+        second value) and in the plan view (``loft_ghost_plan_line``). From
+        ``[ghost_line]`` of the meta data file, if any."""
+        ghost = self._meta.get("ghost_line")
+        return (ghost["row"], float(ghost["height"])) if ghost else None
 
     def ghost_body_points(self) -> list:
         """The ghost line as points of a body line: ``[GhostPoint]``, empty

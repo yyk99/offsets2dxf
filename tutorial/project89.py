@@ -2,10 +2,10 @@
 
 Heights (Sheer, B 3', B 2', B 1', Rabbet, Profile) are measured from the LWL,
 positive up. Half-breadths are the "1/2w Deck", "WL ..." and "... Plan" rows.
-Some cells hold two values ("0-2-0 and 0-3-0"); the first one is used
-(``set_multi_value_policy("first")``).
-
-The bow is station 0 (``set_bow_station``); the stern, station 33, is at x = 0.
+The grid (stations, waterlines, buttocks, diagonals, ghost line, sheet
+layout), the bow station and the treatment of the cells with two values
+("0-2-0 and 0-3-0": the first one is used) are in the meta data file
+``sample_data/offset_table.meta``, which ``Model`` loads.
 
 Body plan sides (``body_sides``): ``"half"``, ``"both"`` (both halves) or
 ``"split"`` (aft stations on the left, forward on the right). The default is
@@ -39,8 +39,6 @@ class Project89(table_of_offsets.Model):
         super().__init__(
             os.path.join(os.path.dirname(__file__), "../sample_data/offset_table.csv")
         )
-        self.set_multi_value_policy("first")
-        self.set_bow_station("0")  # the stem; the stern (station 33) is at x = 0
         # fmt: off
         self.set_under_waterline(
             {
@@ -83,51 +81,6 @@ class Project89(table_of_offsets.Model):
         ]:
             return 10 * 12.0  #
         return 0
-
-    def buttocks_positions(self):
-        return {"B 3'": 3 * 12.0, "B 2'": 2 * 12.0, "B 1'": 12 * 1.0}
-
-    def waterlines_positions(self):
-        return {
-            "WL + 2'": 2 * 12.0,
-            "WL + 1'": 12.0,
-            'WL + 6"': 6.0,
-            "LWL": 0.0,
-            'WL - 6"': -6.0,
-            "WL - 1'": -12.0,
-            "WL - 2'": -24.0,
-            "WL - 3'": -36.0,
-            "WL - 4'": -4 * 12,
-        }
-
-    def drawing_area_vertical_borders(self):
-        """(virtual)"""
-        return (-12 * 10, 20 * 12)
-
-    def grid_y_origins(self):
-        """(virtual) we want two horizontal grid lines"""
-        return [0, 10 * 12.0]
-
-    def diagonals_positions(self):
-        """{name: (y0, x1, y1)}, inches above the LWL: the line from (0, y0)
-        through (x1, y1). Given: D1 from (0, -12) = WL - 1' through
-        (36, -36) = (B 3', WL - 3'). D2 from (0, 0) = LWL through
-        (36, -36). D3 from (0, 24) = WL + 2' through (60, -6) = (60",
-        WL - 6")."""
-        return {
-            "D1": (-12.0, 36.0, -36.0),
-            "D2": (0.0, 36.0, -36.0),
-            "D3": (24.0, 60.0, -6.0),
-        }
-
-    def diagonal_row(self, name: str) -> str:
-        return {"D1": "Diagonal 1", "D2": "D 2", "D3": "D 3"}.get(name, name)
-
-    def ghost_line(self):
-        """The ghost line (plan view, profile view and body lines): at the height -51" (4-3-0 below
-        the LWL, the Profile at station 14), over the stations 20-16, which
-        have the second values of the "and" cells of the Profile Plan."""
-        return ("Profile Plan", -51.0)
 
     def keel_body_point(self):
         return ("Profile Plan", "Profile")

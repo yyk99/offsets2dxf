@@ -1,0 +1,69 @@
+# The model grid of sample_data/offset_table.csv (project 89), in TOML.
+# Lengths are in inches (the table is in feet-inches-eighths); heights are
+# above the LWL, positive up.
+
+[table]
+csv = "offset_table.csv"
+unit = "ftin"
+# the stem; the stern, station 33, is at x = 0
+bow_station = "0"
+# a cell "0-2-0 and 0-3-0": use the first value
+multi_value = "first"
+
+# x of the stations by name (the names are labels); the stations are not
+# equally spaced
+[stations.positions]
+"33" = 0
+"32" = 12
+"30" = 36
+"28" = 60
+"26" = 84
+"24" = 108
+"22" = 132
+"20" = 156
+"18" = 180
+"16" = 204
+"14" = 228
+"12" = 252
+"10" = 276
+"8" = 300
+"6" = 324
+"4" = 348
+"2" = 372
+"0" = 396
+
+# name = { height, row }: the height above the LWL; row is the table row with
+# the half-breadths, the default is the name
+[waterlines]
+"WL + 2'" = { height = 24.0 }
+"WL + 1'" = { height = 12.0 }
+'WL + 6"' = { height = 6.0 }
+LWL       = { height = 0.0 }
+'WL - 6"' = { height = -6.0 }
+"WL - 1'" = { height = -12.0 }
+"WL - 2'" = { height = -24.0 }
+"WL - 3'" = { height = -36.0 }
+"WL - 4'" = { height = -48.0 }
+
+# name = the half-breadth of the buttock line
+[buttocks]
+"B 3'" = 36.0
+"B 2'" = 24.0
+"B 1'" = 12.0
+
+# name = { row, from, through }: the line from (0, y0) through (x1, y1); the
+# table row holds the distance along it from (0, y0)
+[diagonals]
+D1 = { row = "Diagonal 1", from = [0.0, -12.0], through = [36.0, -36.0] }
+D2 = { row = "D 2", from = [0.0, 0.0], through = [36.0, -36.0] }
+D3 = { row = "D 3", from = [0.0, 24.0], through = [60.0, -6.0] }
+
+# the second values of the "and" cells of the row, at the height
+[ghost_line]
+row = "Profile Plan"
+height = -51.0
+
+# the layout of the drawing
+[sheet]
+y_origins = [0.0, 120.0]
+vertical_borders = [-120.0, 240.0]
