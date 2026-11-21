@@ -41,7 +41,6 @@ import os
 MM = 1.0 / 25.4  # inches in a millimetre
 
 STATION_DISTANCE_MM = 510.0
-BUTTOCK_DISTANCE_MM = 300.0
 # the waterlines: name -> (height above the baseline, mm; the table row with
 # the half-breadths). DWL is the design waterline, "WL V" of the table
 WATERLINES_MM = {
@@ -92,8 +91,13 @@ class ProjectTabbyCat(table_of_offsets.Model):
         return 0
 
     def buttocks_positions(self):
+        """{name: half-breadth from the centerline} of the buttocks, 300 mm
+        apart"""
         return {
-            "B %d" % n: n * BUTTOCK_DISTANCE_MM * MM for n in range(1, 5)
+            "B 1": 300 * MM,
+            "B 2": 600 * MM,
+            "B 3": 900 * MM,
+            "B 4": 1200 * MM,
         }
 
     def waterline_row(self, name: str) -> str:
