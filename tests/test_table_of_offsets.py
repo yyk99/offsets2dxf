@@ -2,6 +2,7 @@
 
 from context import table_of_offsets
 
+import tempfile
 import unittest
 import os
 
@@ -444,3 +445,18 @@ class Test_BodyLine(unittest.TestCase):
             self.model.breadth_at("99", "Sheer")
         with self.assertRaises(ValueError):
             self.model.breadth_at("33", "Sheer")  # empty cell
+
+
+class Test_LoftLineRuns(unittest.TestCase):
+    def test_empty_cells_break_the_line(self):
+        d = tempfile.mkdtemp()
+        csv = os.path.join(d, "t.csv")
+        with open(csv, "w") as f:
+            f.write("#,A,B,C,D,E,F\nBreadth WL,1,2,,,5,6\nOther,,,,,,7\n")
+        m = table_of_offsets.Model(csv, unit="inch", meta=False)
+        runs = m.loft_line_n_runs(0)
+        self.assertEqual(
+            [[(0, 1), (12, 2)], [(48, 5), (60, 6)]],
+            [[(round(x), round(y)) for x, y in r] for r in runs],
+        )
+        self.assertEqual([], m.loft_line_n_runs(1))

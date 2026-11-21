@@ -22,6 +22,7 @@ Classes:
 """
 
 import argparse
+import copy
 import math
 import os
 import re
@@ -186,6 +187,8 @@ _META_KEYS = {
     "table": {"csv", "unit", "bow_station", "multi_value"},
     "stations": {"origin", "spacing", "positions"},
     "ghost_line": {"row", "height"},
+    "keel": {"from", "to", "siding"},
+    "rabbet": {"siding"},
     "sheet": {"y_origins", "vertical_borders"},
 }
 # the sections with one entry per name
@@ -207,11 +210,47 @@ def find_meta(csv_path: str):
     return found[0] if found else None
 
 
+def _meta_lengths_to_inches(meta: dict, k: float) -> dict:
+    """A copy of ``meta`` with every length multiplied by ``k`` (inches in a
+    unit of the table; 1 for ``ftin`` and ``inch``)."""
+    if k == 1.0:
+        return meta
+    meta = copy.deepcopy(meta)
+    st = meta.get("stations", {})
+    for key in ("origin", "spacing"):
+        if key in st:
+            st[key] *= k
+    for name in st.get("positions", {}):
+        st["positions"][name] *= k
+    for name in meta.get("buttocks", {}):
+        meta["buttocks"][name] *= k
+    for section in ("keel", "rabbet"):
+        if "siding" in meta.get(section, {}):
+            meta[section]["siding"] *= k
+    for d in meta.get("waterlines", {}).values():
+        d["height"] *= k
+    for d in meta.get("diagonals", {}).values():
+        d["from"] = [v * k for v in d["from"]]
+        d["through"] = [v * k for v in d["through"]]
+    for end in ("from", "to"):
+        if end in meta.get("keel", {}):
+            meta["keel"][end]["height"] *= k
+    if "height" in meta.get("ghost_line", {}):
+        meta["ghost_line"]["height"] *= k
+    sheet = meta.get("sheet", {})
+    for key in ("y_origins", "vertical_borders"):
+        if key in sheet:
+            sheet[key] = [v * k for v in sheet[key]]
+    return meta
+
+
 def load_meta(path: str) -> dict:
     """Read and check a meta data file (TOML, see
     ``sample_data/offset_table.meta``) that describes the grid of a model:
     ``[table]``, ``[stations]``, ``[waterlines]``, ``[buttocks]``,
-    ``[diagonals]``, ``[ghost_line]`` and ``[sheet]``. Lengths are in inches.
+    ``[diagonals]``, ``[keel]``, ``[rabbet]``, ``[ghost_line]`` and ``[sheet]``. Lengths are in the unit of the
+    table (``[table] unit``; inches for ``ftin``), the model converts them
+    to inches.
     Raises ValueError for an unknown section or key or a malformed value."""
     with open(path, "rb") as f:
         try:
@@ -255,6 +294,20 @@ def load_meta(path: str) -> dict:
     for name, value in meta.get("buttocks", {}).items():
         if not number(value):
             raise bad("buttock %r must be a number" % name)
+    for end in ("from", "to"):
+        if end in meta.get("keel", {}):
+            e = meta["keel"][end]
+            if (
+                not isinstance(e, dict)
+                or set(e) != {"station", "height"}
+                or not isinstance(e["station"], str)
+                or not number(e["height"])
+            ):
+                raise bad("[keel] %s must be { station = \"..\", height = N }" % end)
+    for section in ("keel", "rabbet"):
+        value = meta.get(section, {}).get("siding")
+        if "siding" in meta.get(section, {}) and (not number(value) or value <= 0):
+            raise bad("[%s] siding must be a positive number" % section)
     for section in ("waterlines", "diagonals"):
         for name, entry in meta.get(section, {}).items():
             if not isinstance(entry, dict):
@@ -395,6 +448,9 @@ class Model:
                 % (unit, list(TableOfOffsets.UNITS))
             )
         self._unit = unit
+        self._meta = _meta_lengths_to_inches(
+            self._meta, TableOfOffsets.UNITS[unit] or 1.0
+        )
         self._multi_value = meta_table.get("multi_value", "error")
         self._filename_csv = _filename_csv
         # read the cells as text: the numbers are converted by offset_to_inches
@@ -520,6 +576,51 @@ class Model:
         print("TODO: please define buttocks_positions()")
         return {}
 
+    def siding(self, name: str, default: float = None) -> float:
+        """The siding of the element ``name`` (``"keel"`` or ``"rabbet"``), in
+        inches: its breadth, the full width across the centerline. From the
+        key ``siding`` of the section ``[keel]`` or ``[rabbet]`` of the meta
+        data file; ``default`` if the file does not give it. The
+        half-breadth of the element is half of it."""
+        value = self._meta.get(name, {}).get("siding")
+        return default if value is None else float(value)
+
+    def keel_line(self):
+        """The keel in the profile view, a straight line:
+        ``((x0, y0), (x1, y1))`` in inches, from ``[keel]`` of the meta data
+        file (``from`` and ``to``: the station and the height above the
+        datum), or None if the file has none. A station that is not in the
+        table is a ValueError."""
+        keel = self._meta.get("keel")
+        if not keel or "from" not in keel or "to" not in keel:
+            return None
+        positions = self.station_positions()
+        ends = []
+        for end in ("from", "to"):
+            station = keel[end]["station"]
+            if station not in positions:
+                raise ValueError("[keel] %s: unknown station %r" % (end, station))
+            ends.append((positions[station], float(keel[end]["height"])))
+        return tuple(ends)
+
+    def keel_point_at(self, station: str):
+        """The keel point of the body line of ``station``: ``(half siding,
+        height)`` in inches, the height is that of the keel line
+        (``keel_line``) at the x of the station; None if the file gives no
+        keel line or the station is beyond its ends. The half siding is half
+        of ``siding("keel")`` (0 if the file does not give it). The body line
+        of a station with a keel point goes down to it."""
+        line = self.keel_line()
+        if line is None:
+            return None
+        (x0, y0), (x1, y1) = line
+        x = self.station_positions()[station]
+        eps = 1e-9
+        if not (min(x0, x1) - eps <= x <= max(x0, x1) + eps):
+            return None
+        t = 0.0 if x1 == x0 else (x - x0) / (x1 - x0)
+        return (self.siding("keel", 0.0) / 2, y0 + t * (y1 - y0))
+
     def waterlines_positions(self):
         """(virtual) Return a dictionary: ``{name: height}``. From
         ``[waterlines]`` of the meta data file, if any."""
@@ -587,6 +688,28 @@ class Model:
                 )
 
         return poly_line
+
+    def loft_line_n_runs(self, n: int):
+        """Like ``loft_line_n`` but a station with an empty cell breaks the
+        line: returns a list of polylines, one for each run of consecutive
+        stations (in the column order) that have the cell, so the line is not
+        drawn across the stations where it does not exist (e.g. a waterline
+        above the sheer). Runs of one point are dropped."""
+        line_offsets = self._too.loc[n]
+        stations = self.station_positions()
+        line_name = line_offsets["#"]
+        runs = [[]]
+        for pos in stations:
+            offset = line_offsets[pos]
+            if type(offset) is str:
+                s = self.offset_sign(pos, line_name)
+                off = self.base_offset(line_name)
+                runs[-1].append(
+                    (stations[pos], s * self.offset_to_inches(offset) + off)
+                )
+            elif runs[-1]:
+                runs.append([])
+        return [r for r in runs if len(r) > 1]
 
     def loft_line_n_sorted(self, n: int):
         """Like ``loft_line_n`` but the points are sorted by x."""
@@ -953,6 +1076,9 @@ class Model:
         keel_points = self._station_points(positions, [keel] if keel else [])
         for station in positions:
             poly = self.loft_body_line(station, body_points, skip_missing=True)
+            keel_pt = self.keel_point_at(station)
+            if keel_pt is not None:
+                poly.append(keel_pt)
             poly.sort(key=lambda pt: -pt[1])
             if keel_link and poly and poly[-1][0] != 0:
                 poly.append((0.0, poly[-1][1]))
