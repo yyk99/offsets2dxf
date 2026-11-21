@@ -338,3 +338,110 @@ class Test_KeelPoint(unittest.TestCase):
             [(round(p[0] / mm), round(p[1] / mm)) for p in lines["B"][0]],
             [(300, 100), (20, 0), (0, 0)],
         )
+
+
+class Test_KeelAndRabbetLines(unittest.TestCase):
+    MM = 1 / 25.4
+
+    def model(self, grid):
+        d = tempfile.mkdtemp()
+        csv = os.path.join(d, "t.csv")
+        with open(csv, "w") as f:
+            f.write(
+                "#,A,B,C\nHeight Sheer,100,100,100\nBreadth Sheer,300,300,300\n"
+                "Height RL,,20,30\n"
+            )
+        with open(os.path.join(d, "t.grid"), "w") as f:
+            f.write(grid)
+        return table_of_offsets.Model(csv)
+
+    GRID = (
+        '[table]\nunit = "mm"\n[stations]\nspacing = 100.0\n'
+        "[sheet]\ny_origins = [0, -500]\n"
+        '[keel]\nfrom = { station = "B", height = 0 }\n'
+        'to = { station = "C", height = 0 }\nsiding = 40.0\n'
+        '[rabbet]\nheight_row = "Height RL"\nsiding = 60.0\n'
+    )
+
+    def mm(self, line):
+        return [(round(x / self.MM), round(y / self.MM)) for x, y in line]
+
+    def test_lines(self):
+        m = self.model(self.GRID)
+        self.assertEqual([(100, 0), (200, 0)], self.mm(m.keel_profile_line()))
+        self.assertEqual([(100, 20), (200, 30)], self.mm(m.rabbet_profile_line()))
+        # constant half-breadth off the plan centerline (y = -500)
+        self.assertEqual([(100, -480), (200, -480)], self.mm(m.keel_plan_line()))
+        self.assertEqual([(100, -470), (200, -470)], self.mm(m.rabbet_plan_line()))
+
+    def test_rabbet_body_point(self):
+        m = self.model(self.GRID)
+        x, row = m.rabbet_body_point()
+        self.assertAlmostEqual(30 * self.MM, x)
+        self.assertEqual("Height RL", row)
+        # loft_body_lines adds it: the rabbet point is in the body lines
+        lines = m.loft_body_lines(
+            [("Breadth Sheer", "Height Sheer")], "raw", sides="half"
+        )
+        self.assertIn((30, 30), [(round(x / self.MM), round(y / self.MM)) for x, y in lines["C"][0]])
+
+    def test_nothing_in_the_file(self):
+        m = self.model("[table]\nunit = 'mm'\n")
+        self.assertIsNone(m.keel_profile_line())
+        self.assertIsNone(m.rabbet_profile_line())
+        self.assertIsNone(m.keel_plan_line())
+        self.assertIsNone(m.rabbet_body_point())
+
+    def test_no_plan_view(self):
+        m = self.model(self.GRID.replace("y_origins = [0, -500]", "y_origins = [0]"))
+        self.assertIsNone(m.plan_centerline_y())
+        self.assertIsNone(m.keel_plan_line())
+
+    def test_bad_rabbet_rows(self):
+        for text in (
+            "[rabbet]\nheight_row = 3\n",
+            '[rabbet]\nheight_row = ""\n',
+            '[rabbet]\nheight_row = "Height RL"\nbreadth_row = 3\n',
+            '[rabbet]\nbreadth_row = "Breadth RL"\n',
+            '[rabbet]\nrow = "Height RL"\n',
+        ):
+            with self.assertRaises(ValueError, msg=text):
+                self.model(text)
+
+    def test_rabbet_breadth_row(self):
+        """a breadth row of the table wins over the siding"""
+        d = tempfile.mkdtemp()
+        csv = os.path.join(d, "t.csv")
+        with open(csv, "w") as f:
+            f.write(
+                "#,A,B,C\nHeight Sheer,100,100,100\nBreadth Sheer,300,300,300\n"
+                "Height RL,,20,30\nBreadth RL,,5,8\n"
+            )
+        with open(os.path.join(d, "t.grid"), "w") as f:
+            f.write(
+                '[table]\nunit = "mm"\n[stations]\nspacing = 100.0\n'
+                "[sheet]\ny_origins = [0, -500]\n"
+                '[rabbet]\nheight_row = "Height RL"\nbreadth_row = "Breadth RL"\n'
+                "siding = 60.0\n"
+            )
+        m = table_of_offsets.Model(csv)
+        self.assertEqual(("Breadth RL", "Height RL"), m.rabbet_body_point())
+        # no base_offset here: the plan line is the breadth row itself
+        self.assertEqual([(100, 5), (200, 8)], self.mm(m.rabbet_plan_line()))
+        self.assertEqual([(100, 20), (200, 30)], self.mm(m.rabbet_profile_line()))
+
+    def test_plot(self):
+        class Dxf:
+            def __init__(self):
+                self.lines = []
+
+            def add_red_polyline(self, line):
+                self.lines.append(line)
+
+        m = self.model(self.GRID)
+        dxf = Dxf()
+        m.plot_keel_and_rabbet(dxf)
+        self.assertEqual(4, len(dxf.lines))
+        dxf = Dxf()
+        m.plot_keel_and_rabbet(dxf, plan=False)
+        self.assertEqual(2, len(dxf.lines))

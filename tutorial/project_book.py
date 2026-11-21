@@ -42,17 +42,10 @@ class ProjectBook(table_of_offsets.Model):
             return self.grid_y_origins()[1]
         return 0
 
-    def rabbet_body_point(self):
-        """``R/L`` is the rabbet line (the user's reading). The table has no
-        half-breadth for it: it is half of the rabbet siding (``[siding]
-        rabbet`` of the grid file, the same along the rabbet), 0 if the file
-        has none."""
-        return (self.siding("rabbet", 0.0) / 2, "Height R/L")
-
     def body_points(self):
         """The (breadth, height) points of a body line, without the waterlines
-        (``loft_body_lines`` adds them)."""
-        return [("Breadth Sheer", "Height Sheer"), self.rabbet_body_point()] + [
+        and the rabbet (``loft_body_lines`` adds them)."""
+        return [("Breadth Sheer", "Height Sheer")] + [
             (offset, "Height " + name)
             for name, offset in self.buttocks_positions().items()
         ]
@@ -92,7 +85,7 @@ class ProjectBook(table_of_offsets.Model):
             self.plot_grid(dxf, **grid_options)
 
             # profile view
-            for name in ["Height R/L", "Height B1", "Height B2", "Height Sheer"]:
+            for name in ["Height B1", "Height B2", "Height Sheer"]:
                 dxf.add_red_polyline(self.loft_line_n(self.line_to_index(name)))
 
             # plan view; a waterline is not drawn across the stations where
@@ -110,18 +103,9 @@ class ProjectBook(table_of_offsets.Model):
                 for line in self.loft_line_n_runs(self.line_to_index(name)):
                     dxf.add_red_polyline(line)
 
-            # the rabbet line in the plan view: a constant half-breadth (half
-            # of the siding) at the stations where the table has its height
-            y_plan = self.grid_y_origins()[1] + self.rabbet_body_point()[0]
-            rabbet = self.loft_line_n(self.line_to_index("Height R/L"))
-            dxf.add_red_polyline([(x, y_plan) for x, _ in rabbet])
-
-            # the keel: a straight line in the profile view, a constant
-            # half-breadth (half of the siding) in the plan view
-            (x0, y0), (x1, y1) = self.keel_line()
-            dxf.add_red_polyline([(x0, y0), (x1, y1)])
-            y_keel = self.grid_y_origins()[1] + self.siding("keel", 0.0) / 2
-            dxf.add_red_polyline([(x0, y_keel), (x1, y_keel)])
+            # the keel and the rabbet lines, in the profile and plan views,
+            # as the grid file gives them
+            self.plot_keel_and_rabbet(dxf)
 
             # body plan
             self.plot_body_lines(dxf, body_lines)

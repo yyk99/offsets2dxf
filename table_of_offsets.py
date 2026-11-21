@@ -188,7 +188,7 @@ _META_KEYS = {
     "stations": {"origin", "spacing", "positions"},
     "ghost_line": {"row", "height"},
     "keel": {"from", "to", "siding"},
-    "rabbet": {"siding"},
+    "rabbet": {"siding", "height_row", "breadth_row"},
     "sheet": {"y_origins", "vertical_borders"},
 }
 # the sections with one entry per name
@@ -308,6 +308,12 @@ def load_meta(path: str) -> dict:
         value = meta.get(section, {}).get("siding")
         if "siding" in meta.get(section, {}) and (not number(value) or value <= 0):
             raise bad("[%s] siding must be a positive number" % section)
+    rabbet = meta.get("rabbet", {})
+    for key in ("height_row", "breadth_row"):
+        if key in rabbet and not (isinstance(rabbet[key], str) and rabbet[key]):
+            raise bad("[rabbet] %s must be the name of a table row" % key)
+    if "breadth_row" in rabbet and "height_row" not in rabbet:
+        raise bad("[rabbet] breadth_row needs height_row")
     for section in ("waterlines", "diagonals"):
         for name, entry in meta.get(section, {}).items():
             if not isinstance(entry, dict):
@@ -620,6 +626,64 @@ class Model:
             return None
         t = 0.0 if x1 == x0 else (x - x0) / (x1 - x0)
         return (self.siding("keel", 0.0) / 2, y0 + t * (y1 - y0))
+
+    def plan_centerline_y(self):
+        """(virtual) The y of the centerline of the plan view, where the
+        half-breadths are measured from: the second of ``grid_y_origins``, or
+        None if the sheet has only one view."""
+        origins = self.grid_y_origins()
+        return origins[1] if len(origins) > 1 else None
+
+    def keel_profile_line(self):
+        """The keel in the profile view: ``[(x0, y0), (x1, y1)]`` from the
+        ``[keel]`` line, or None if the file gives none."""
+        line = self.keel_line()
+        return None if line is None else list(line)
+
+    def rabbet_profile_line(self):
+        """The rabbet in the profile view: the polyline of the row
+        ``height_row`` of ``[rabbet]`` (the heights above the datum at the
+        stations that have them), or None if the file gives no such row."""
+        row = self._meta.get("rabbet", {}).get("height_row")
+        return None if row is None else self.loft_line_n(self.line_to_index(row))
+
+    def _plan_line(self, profile: list, siding_name: str):
+        """The plan view of an element of a constant siding: a line at half
+        the siding off the plan centerline, over the x of its profile line."""
+        y0 = self.plan_centerline_y()
+        if profile is None or y0 is None:
+            return None
+        y = y0 + self.siding(siding_name, 0.0) / 2
+        return [(x, y) for x, _ in profile]
+
+    def keel_plan_line(self):
+        """The keel in the plan view (see ``_plan_line``), or None."""
+        return self._plan_line(self.keel_profile_line(), "keel")
+
+    def rabbet_plan_line(self):
+        """The rabbet in the plan view, or None if the file gives no rabbet:
+        the polyline of the row ``breadth_row`` of ``[rabbet]`` if it has
+        one (like the other half-breadth rows, shifted by ``base_offset``),
+        else a line of the constant ``siding`` (see ``_plan_line``)."""
+        row = self._meta.get("rabbet", {}).get("breadth_row")
+        if row is not None:
+            return self.loft_line_n(self.line_to_index(row))
+        return self._plan_line(self.rabbet_profile_line(), "rabbet")
+
+    def plot_keel_and_rabbet(
+        self, dxf: object, profile: bool = True, plan: bool = True
+    ):
+        """Draw the keel and the rabbet lines that the meta data file gives
+        into ``dxf``: in the profile view (``profile``) and in the plan view
+        (``plan``). Lines the file does not give are not drawn."""
+        lines = []
+        if profile:
+            lines += [self.keel_profile_line(), self.rabbet_profile_line()]
+        if plan:
+            lines += [self.keel_plan_line(), self.rabbet_plan_line()]
+        for line in lines:
+            if line:
+                dxf.add_red_polyline(line)
 
     def waterlines_positions(self):
         """(virtual) Return a dictionary: ``{name: height}``. From
@@ -1060,6 +1124,10 @@ class Model:
             + self.ghost_body_points()
         )
 
+        rabbet = self.rabbet_body_point()
+        if rabbet and rabbet not in body_points:
+            body_points.append(rabbet)
+
         positions = self.station_positions()
         if bow_station is None:
             bow_station = self._bow_station
@@ -1070,7 +1138,6 @@ class Model:
         # rabbet_body_point(); a station without it (an empty cell) has no
         # such point
         sheer_points = self._station_points(positions, body_points[:1])
-        rabbet = self.rabbet_body_point()
         rabbet_points = self._station_points(positions, [rabbet] if rabbet else [])
         keel = self.keel_body_point()
         keel_points = self._station_points(positions, [keel] if keel else [])
@@ -1190,8 +1257,15 @@ class Model:
         """(virtual) The ``(breadth, height)`` point of a body line (as an
         item of ``body_points``) that is the rabbet, or None if the hull has
         no rabbet line. Its points of the consecutive stations make the rabbet
-        line of the body plan."""
-        return None
+        line of the body plan. From ``[rabbet]`` of the meta data file if it
+        has ``height_row``: (``breadth_row``, ``height_row``), or without
+        ``breadth_row`` (half of ``siding``, ``height_row``), the
+        half-breadth being 0 without a siding."""
+        rabbet = self._meta.get("rabbet", {})
+        if "height_row" not in rabbet:
+            return None
+        breadth = rabbet.get("breadth_row", self.siding("rabbet", 0.0) / 2)
+        return (breadth, rabbet["height_row"])
 
     @staticmethod
     def body_plan_sides(placement: str, sides: str = None):
