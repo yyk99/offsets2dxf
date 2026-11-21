@@ -97,8 +97,15 @@ class ProjectBook(table_of_offsets.Model):
 
             # plan view; a waterline is not drawn across the stations where
             # the sheer is below it (the empty cells of the table)
-            for name in ["Breadth WL %d" % n for n in range(1, 8)] + [
-                "Breadth Sheer"
+            for name in [
+                "Breadth WL 1",
+                "Breadth WL 2",
+                "Breadth WL 3",
+                "Breadth WL 4",
+                "Breadth WL 5",
+                "Breadth WL 6",
+                "Breadth WL 7",
+                "Breadth Sheer",
             ]:
                 for line in self.loft_line_n_runs(self.line_to_index(name)):
                     dxf.add_red_polyline(line)
