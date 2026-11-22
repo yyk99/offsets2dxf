@@ -179,6 +179,33 @@ def offset_to_inches(
     return float(value) * TableOfOffsets.UNITS[unit]
 
 
+# The marker of a table cell that lies on the straight line between the
+# nearest values of its row to the left and to the right ("STRAIGHT LINE" in
+# the books). ``Model`` replaces the cells with the interpolated values.
+STRAIGHT_LINE_MARKER = "straight"
+
+
+def inches_to_offset(value: float, unit: str = "ftin") -> str:
+    """The inverse of ``offset_to_inches``: the text of a table cell for
+    ``value`` inches. For ``"ftin"`` it is ``F-I-E`` rounded to 1/16" (a
+    trailing ``+`` is 1/16"), e.g. 3.5 -> ``0-3-4``; ValueError for a negative
+    value, which the notation cannot express. For the other units it is the
+    plain number in that unit."""
+    if unit not in TableOfOffsets.UNITS:
+        raise ValueError(
+            "unknown unit %r, expected one of %s" % (unit, list(TableOfOffsets.UNITS))
+        )
+    if unit != "ftin":
+        return repr(round(value / TableOfOffsets.UNITS[unit], 6))
+    if value < 0:
+        raise ValueError("%r inches cannot be written as F-I-E" % (value,))
+    sixteenths = round(value * 16)
+    eighths, plus = divmod(sixteenths, 2)
+    feet, rest = divmod(eighths, 96)
+    inches, eighths = divmod(rest, 8)
+    return "%d-%d-%d%s" % (feet, inches, eighths, "+" if plus else "")
+
+
 # the extensions of a meta data file ("meta" and "grid" are synonyms)
 META_EXTENSIONS = (".meta", ".grid")
 
@@ -462,12 +489,73 @@ class Model:
         # read the cells as text: the numbers are converted by offset_to_inches
         self._too = pandas.read_csv(self._filename_csv, dtype=str)
         self._under_waterline = {}
+        self._resolve_straight_lines()
         # x of the centerline of the body plan lofted last (loft_body_lines)
         self.body_plan_centerline_x = None
         self._bow_station = None
         if "bow_station" in meta_table:
             self.set_bow_station(meta_table["bow_station"])
         self._output_unit = None
+
+    def _resolve_straight_lines(self):
+        """Replace the cells ``STRAIGHT_LINE_MARKER`` with the values on the
+        straight line between the nearest values of the row to the left and
+        to the right, interpolated by the x of the stations
+        (``station_positions``). The run of marked cells must have a value
+        right before and right after it, else ValueError. The values are
+        written in the unit of the table (see ``inches_to_offset``)."""
+        names = [c for c in self._too.columns if c != "#"]
+        marked = any(
+            self._too.loc[r, c] == STRAIGHT_LINE_MARKER
+            for r in self._too.index
+            for c in names
+        )
+        if not marked:
+            return
+        positions = self.station_positions()
+
+        def value(row, name):
+            cell = self._too.loc[row, name]
+            if type(cell) is not str or cell == STRAIGHT_LINE_MARKER:
+                return None
+            return self.offset_to_inches(cell)
+
+        for row in self._too.index:
+            i = 0
+            while i < len(names):
+                if self._too.loc[row, names[i]] != STRAIGHT_LINE_MARKER:
+                    i += 1
+                    continue
+                j = i
+                while (
+                    j + 1 < len(names)
+                    and self._too.loc[row, names[j + 1]] == STRAIGHT_LINE_MARKER
+                ):
+                    j += 1
+                what = "row %r, stations %r..%r" % (
+                    self._too.loc[row, "#"],
+                    names[i],
+                    names[j],
+                )
+                if i == 0 or j + 1 == len(names):
+                    raise ValueError(
+                        "%s: a straight line needs a value on both sides" % what
+                    )
+                left, right = names[i - 1], names[j + 1]
+                v0, v1 = value(row, left), value(row, right)
+                if v0 is None or v1 is None:
+                    raise ValueError(
+                        "%s: a straight line needs a value on both sides" % what
+                    )
+                x0, x1 = positions[left], positions[right]
+                if x0 == x1:
+                    raise ValueError("%s: the end stations are at the same x" % what)
+                for k in range(i, j + 1):
+                    t = (positions[names[k]] - x0) / (x1 - x0)
+                    self._too.loc[row, names[k]] = inches_to_offset(
+                        v0 + t * (v1 - v0), self._unit
+                    )
+                i = j + 1
 
     def set_bow_station(self, station: str):
         """Tell which station is at the bow end, e.g. ``"1"`` or ``"0"``.
