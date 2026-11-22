@@ -26,7 +26,8 @@ class Project181(table_of_offsets.Model):
         super().__init__(
             os.path.join(
                 os.path.dirname(__file__), "../sample_data_too/offset_table_181.csv"
-            )
+            ),
+            meta=False,  # the grid is in this file; see project181_meta.py
         )
         # fmt: off
         self.set_under_waterline(
@@ -183,6 +184,10 @@ class Project181(table_of_offsets.Model):
             # waterlines: 24" LL, 16" LL, 8" LL, DWL, 8" DL, 16" DL
             for n in range(7, 13):
                 dxf.add_red_polyline(self.loft_line_n_sorted(n))
+            # the rabbet line in the plan view
+            dxf.add_red_polyline(
+                self.loft_line_n_sorted(self.line_to_index("Rabbet Line"))
+            )
 
             # the diagonals in the plan view, below the plan centerline
             self.plot_diagonal_plan_lines(dxf)
