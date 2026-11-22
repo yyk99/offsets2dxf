@@ -445,3 +445,297 @@ class Test_KeelAndRabbetLines(unittest.TestCase):
         dxf = Dxf()
         m.plot_keel_and_rabbet(dxf, plan=False)
         self.assertEqual(2, len(dxf.lines))
+
+    def test_rabbet_extra_points(self):
+        """extra points, dx right of a station, height above the datum; the
+        line stays ordered by x in the direction of the line of the table"""
+        grid = self.GRID.replace(
+            "siding = 60.0\n",
+            "siding = 60.0\nextra_points = [\n"
+            '  { station = "A", dx = -30.0, height = 5.0 },\n'
+            '  { station = "C", dx = 40.0, height = 9.0 },\n]\n',
+        )
+        m = self.model(grid)
+        self.assertEqual(
+            [(-30, 5), (100, 20), (200, 30), (240, 9)], self.mm(m.rabbet_profile_line())
+        )
+        # the table of the rabbet runs to the left: the line is descending
+        m = self.model(
+            grid.replace('spacing = 100.0', "origin = 200.0\nspacing = -100.0")
+        )
+        xs = [x for x, _ in m.rabbet_profile_line()]
+        self.assertEqual(sorted(xs, reverse=True), xs)
+
+    def test_bad_rabbet_extra_points(self):
+        for text in (
+            '[rabbet]\nheight_row = "Height RL"\nextra_points = 3\n',
+            '[rabbet]\nheight_row = "Height RL"\nextra_points = [{ station = "A" }]\n',
+            '[rabbet]\nheight_row = "Height RL"\n'
+            'extra_points = [{ station = 1, dx = 0, height = 0 }]\n',
+            '[rabbet]\nextra_points = [{ station = "A", dx = 0, height = 0 }]\n',
+        ):
+            with self.assertRaises(ValueError, msg=text):
+                self.model(text)
+        m = self.model(
+            self.GRID.replace(
+                "siding = 60.0\n",
+                'siding = 60.0\nextra_points = [{ station = "X", dx = 0, height = 0 }]\n',
+            )
+        )
+        with self.assertRaises(ValueError):
+            m.rabbet_profile_line()
+
+    def test_rabbet_extra_points_in_the_plan_view(self):
+        """with a siding: a constant half-breadth over the x of the profile
+        line, the extra points included"""
+        grid = self.GRID.replace(
+            "siding = 60.0\n",
+            'siding = 60.0\nextra_points = [{ station = "C", dx = 40.0, height = 9.0 }]\n',
+        )
+        m = self.model(grid)
+        self.assertEqual(
+            [(100, -470), (200, -470), (240, -470)], self.mm(m.rabbet_plan_line())
+        )
+
+    def test_rabbet_extra_points_with_a_breadth_row(self):
+        """the half-breadth: given, else that of the nearest x of the row"""
+        d = tempfile.mkdtemp()
+        csv = os.path.join(d, "t.csv")
+        with open(csv, "w") as f:
+            f.write(
+                "#,A,B,C\nHeight Sheer,100,100,100\nBreadth Sheer,300,300,300\n"
+                "Height RL,,20,30\nBreadth RL,,5,8\n"
+            )
+        grid = (
+            '[table]\nunit = "mm"\n[stations]\nspacing = 100.0\n'
+            "[sheet]\ny_origins = [0, -500]\n"
+            '[rabbet]\nheight_row = "Height RL"\nbreadth_row = "Breadth RL"\n'
+            "extra_points = [\n"
+            '  { station = "C", dx = 10.0, height = 40 },\n'
+            '  { station = "C", dx = 60.0, height = 50, breadth = 2 },\n'
+            '  { station = "B", dx = -10.0, height = 10 },\n'
+            "]\n"
+        )
+        with open(os.path.join(d, "t.grid"), "w") as f:
+            f.write(grid)
+        m = table_of_offsets.Model(csv)
+        # no base_offset: the plan line is the breadth values; the nearest x
+        # of the row: 8 at C (x = 210), 5 at B (x = 90)
+        self.assertEqual(
+            [(90, 5), (100, 5), (200, 8), (210, 8), (260, 2)],
+            self.mm(m.rabbet_plan_line()),
+        )
+        self.assertEqual(
+            [(90, 10), (100, 20), (200, 30), (210, 40), (260, 50)],
+            self.mm(m.rabbet_profile_line()),
+        )
+
+    def test_bad_extra_points_breadth(self):
+        with self.assertRaises(ValueError):
+            self.model(
+                '[rabbet]\nheight_row = "Height RL"\n'
+                'extra_points = [{ station = "A", dx = 0, height = 0, breadth = "x" }]\n'
+            )
+        with self.assertRaises(ValueError):
+            self.model(
+                '[rabbet]\nheight_row = "Height RL"\n'
+                'extra_points = [{ station = "A", dx = 0, height = 0, width = 1 }]\n'
+            )
+
+    def test_rabbet_extra_point_from_table_rows(self):
+        """the same as the sheer point of a station: rows instead of numbers"""
+        grid = self.GRID.replace(
+            "siding = 60.0\n",
+            "siding = 60.0\nextra_points = [\n"
+            '  { station = "A", height_row = "Height Sheer", breadth_row = "Breadth Sheer" },\n'
+            "]\n",
+        )
+        m = self.model(grid)
+        self.assertEqual(
+            [(0, 100), (100, 20), (200, 30)], self.mm(m.rabbet_profile_line())
+        )
+        # the plan line has the siding: the point is on it, the x is the point
+        self.assertEqual(3, len(m.rabbet_plan_line()))
+        self.assertEqual(0, round(m.rabbet_plan_line()[0][0]))
+
+    def test_bad_extra_point_rows(self):
+        base = '[rabbet]\nheight_row = "Height RL"\nextra_points = [%s]\n'
+        for point in (
+            '{ station = "A" }',
+            '{ station = "A", height = 1, height_row = "Height Sheer" }',
+            '{ station = "A", height = 1, breadth = 1, breadth_row = "Breadth Sheer" }',
+            '{ station = "A", height_row = 3 }',
+        ):
+            with self.assertRaises(ValueError, msg=point):
+                self.model(base % point)
+        # an empty cell of the row at the station
+        m = self.model(
+            self.GRID.replace(
+                "siding = 60.0\n",
+                'siding = 60.0\nextra_points = [{ station = "A", height_row = "Height RL" }]\n',
+            )
+        )
+        with self.assertRaises(ValueError):
+            m.rabbet_profile_line()
+
+
+class Test_RabbetExtraPointsInViews(unittest.TestCase):
+    """the extra points of the rabbet line in the plan and body views"""
+
+    MM = 1 / 25.4
+
+    def model(self, sides_unused=None):
+        d = tempfile.mkdtemp()
+        csv = os.path.join(d, "t.csv")
+        with open(csv, "w") as f:
+            f.write(
+                "#,A,B,C\nHeight Sheer,100,100,100\nBreadth Sheer,300,300,300\n"
+                "Height RL,50,20,30\nBreadth RL,5,5,5\n"
+            )
+        with open(os.path.join(d, "t.grid"), "w") as f:
+            f.write(
+                '[table]\nunit = "mm"\nbow_station = "C"\n'
+                "[stations]\nspacing = 100.0\n[sheet]\ny_origins = [0, -500]\n"
+                '[rabbet]\nheight_row = "Height RL"\nbreadth_row = "Breadth RL"\n'
+                "extra_points = [\n"
+                '  { station = "C", dx = 50.0, height = 60, breadth = 4 },\n'
+                '  { station = "A", dx = -50.0, height = 70, breadth = 3 },\n'
+                "]\n"
+            )
+        return table_of_offsets.Model(csv)
+
+    def mm(self, pts):
+        return [tuple(round(c / self.MM) for c in p) for p in pts]
+
+    def test_body_plan(self):
+        m = self.model()
+        body = [("Breadth Sheer", "Height Sheer")]
+        lines = m.loft_body_lines(body, "raw", sides="split")
+        # raw: the centerline is at x = 0; B is the widest (first of equals);
+        # C is forward (the bow), A is aft: the extra point at x = 250 is
+        # forward (right), the one at x = -50 is aft (left)
+        self.assertEqual(
+            [(4, 60, 1), (-3, 70, 2)],
+            [(round(x / self.MM), round(y / self.MM), n) for x, y, n in lines.extra_points],
+        )
+        # they are on the rabbet line of the body plan
+        pts = [self.mm(p) for p in lines.rabbet]
+        self.assertTrue(any((4, 60) in p for p in pts))
+        self.assertTrue(any((-3, 70) in p for p in pts))
+
+    def test_half(self):
+        m = self.model()
+        lines = m.loft_body_lines(
+            [("Breadth Sheer", "Height Sheer")], "raw", sides="half"
+        )
+        self.assertEqual(2, len(lines.extra_points))
+        self.assertEqual([(4, 60), (3, 70)], [
+            (round(x / self.MM), round(y / self.MM)) for x, y, _ in lines.extra_points
+        ])
+
+    def test_plot_marks_the_points(self):
+        class Dxf:
+            def __init__(self):
+                self.circles, self.texts, self.lines = [], [], []
+
+            def add_red_polyline(self, line):
+                self.lines.append(line)
+
+            def add_red_circle(self, center, radius):
+                self.circles.append(center)
+
+            def text(self, xy, txt, **kw):
+                self.texts.append(txt)
+
+        m = self.model()
+        dxf = Dxf()
+        m.plot_keel_and_rabbet(dxf)
+        # two points in the profile and two in the plan view
+        self.assertEqual(4, len(dxf.circles))
+        self.assertEqual(["E1", "E1", "E2", "E2"], dxf.texts)
+        dxf = Dxf()
+        m.plot_keel_and_rabbet(dxf, extra_points=False)
+        self.assertEqual([], dxf.circles)
+        dxf = Dxf()
+        lines = m.loft_body_lines([("Breadth Sheer", "Height Sheer")], "raw")
+        m.plot_body_lines(dxf, lines)
+        self.assertEqual(2, len(dxf.circles))
+
+
+class Test_ChineLine(unittest.TestCase):
+    MM = 1 / 25.4
+
+    def model(self, chine=True):
+        d = tempfile.mkdtemp()
+        csv = os.path.join(d, "t.csv")
+        with open(csv, "w") as f:
+            f.write(
+                "#,A,B,C,D\nHeight Sheer,100,100,100,100\n"
+                "Breadth Sheer,300,300,300,300\n"
+                "Height Chine,,40,45,\nBreadth Chine,,200,250,\n"
+            )
+        with open(os.path.join(d, "t.grid"), "w") as f:
+            f.write('[table]\nunit = "mm"\nbow_station = "D"\n[stations]\nspacing = 100.0\n')
+            if chine:
+                f.write('[chine]\nheight_row = "Height Chine"\nbreadth_row = "Breadth Chine"\n')
+        return table_of_offsets.Model(csv)
+
+    def test_chine_body_point(self):
+        self.assertEqual(
+            ("Breadth Chine", "Height Chine"), self.model().chine_body_point()
+        )
+        self.assertIsNone(self.model(False).chine_body_point())
+
+    def test_chine_line_in_the_body_plan(self):
+        m = self.model()
+        body = [("Breadth Sheer", "Height Sheer")]
+        lines = m.loft_body_lines(body, "raw", sides="half")
+        # B and C have the chine; it is a point of their body lines
+        chine = [[(round(x / self.MM), round(y / self.MM)) for x, y in p] for p in lines.chine]
+        self.assertEqual([[(200, 40), (250, 45)]], chine)
+        for st, pt in (("B", (200, 40)), ("C", (250, 45))):
+            self.assertIn(
+                pt,
+                [(round(x / self.MM), round(y / self.MM)) for x, y in lines[st][0]],
+            )
+        self.assertEqual(chine, [
+            [(round(x / self.MM), round(y / self.MM)) for x, y in p]
+            for p in m.body_chine_polylines(lines)
+        ])
+        # no chine: no line, nothing added
+        self.assertEqual([], list(self.model(False).loft_body_lines(body, "raw").chine))
+
+    def test_chine_is_drawn(self):
+        class Dxf:
+            def __init__(self):
+                self.lines = []
+
+            def add_red_polyline(self, line):
+                self.lines.append(line)
+
+            def text(self, *a, **kw):
+                pass
+
+        m = self.model()
+        lines = m.loft_body_lines([("Breadth Sheer", "Height Sheer")], "raw", sides="half")
+        dxf = Dxf()
+        m.plot_body_lines(dxf, lines, chine=False)
+        n = len(dxf.lines)
+        dxf = Dxf()
+        m.plot_body_lines(dxf, lines)
+        self.assertEqual(n + 1, len(dxf.lines))
+
+    def test_bad_chine(self):
+        for text in (
+            '[chine]\nheight_row = "Height Chine"\n',
+            '[chine]\nbreadth_row = "Breadth Chine"\n',
+            '[chine]\nheight_row = 3\nbreadth_row = "Breadth Chine"\n',
+        ):
+            d = tempfile.mkdtemp()
+            csv = os.path.join(d, "t.csv")
+            with open(csv, "w") as f:
+                f.write("#,A\nSheer,1\n")
+            with open(os.path.join(d, "t.grid"), "w") as f:
+                f.write(text)
+            with self.assertRaises(ValueError, msg=text):
+                table_of_offsets.Model(csv)

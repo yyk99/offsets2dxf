@@ -50,11 +50,11 @@ class Project28ftCutter(table_of_offsets.Model):
 
     def body_points(self):
         """The (breadth, height) points of a body line: the sheer, the chine
-        and the rabbet (from the grid file). The stations where a cell is
+        and the rabbet (the last two are from the grid file). The stations where a cell is
         empty have no such point."""
         return [
             ("Breadth Sheer", "Height Sheer"),
-            ("Breadth Chine", "Height Chine"),
+            self.chine_body_point(),
             self.rabbet_body_point(),
         ]
 
