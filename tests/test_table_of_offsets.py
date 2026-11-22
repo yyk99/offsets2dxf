@@ -460,3 +460,69 @@ class Test_LoftLineRuns(unittest.TestCase):
             [[(round(x), round(y)) for x, y in r] for r in runs],
         )
         self.assertEqual([], m.loft_line_n_runs(1))
+
+
+class Test_StraightLine(unittest.TestCase):
+    def table(self, text, grid=None, unit=None):
+        d = tempfile.mkdtemp()
+        csv = os.path.join(d, "t.csv")
+        with open(csv, "w") as f:
+            f.write(text)
+        if grid is not None:
+            with open(os.path.join(d, "t.grid"), "w") as f:
+                f.write(grid)
+        return table_of_offsets.Model(csv, unit=unit)
+
+    def test_inches_to_offset(self):
+        f = table_of_offsets.inches_to_offset
+        self.assertEqual("0-3-4", f(3.5))
+        self.assertEqual("1-2-3+", f(12 + 2 + 3 / 8 + 1 / 16))
+        self.assertEqual("0-0-0", f(0))
+        # the round trip within 1/32"
+        for v in (0.0, 0.01, 3.49, 17.77, 100.123):
+            back = table_of_offsets.TableOfOffsets.offset2double(f(v))
+            self.assertAlmostEqual(v, back, delta=1 / 32 + 1e-9)
+        self.assertAlmostEqual(25.4, float(f(1.0, "mm")))
+        with self.assertRaises(ValueError):
+            f(-1.0)
+
+    def test_ftin_by_station_positions(self):
+        """the cells are interpolated by x, not by the column number"""
+        m = self.table(
+            "#,A,B,C,D\nRow,1-0-0,straight,straight,2-0-0\n",
+            "[stations.positions]\nA = 0\nB = 1\nC = 3\nD = 4\n",
+        )
+        self.assertEqual(
+            ["1-0-0", "1-3-0", "1-9-0", "2-0-0"], list(m._too.iloc[0, 1:])
+        )
+        # the offsets come out as inches
+        self.assertAlmostEqual(15.0, m.offset_to_inches(m._too.loc[0, "B"]))
+
+    def test_mm_and_two_runs(self):
+        m = self.table(
+            "#,A,B,C,D,E\nRow,10,straight,30,straight,50\n"
+            "Other,1,2,3,4,5\n",
+            "[table]\nunit = 'mm'\n[stations]\nspacing = 1\n",
+        )
+        self.assertEqual(
+            [10.0, 20.0, 30.0, 40.0, 50.0], [float(c) for c in m._too.iloc[0, 1:]]
+        )
+        self.assertEqual("2", m._too.loc[1, "B"])
+
+    def test_constant_run(self):
+        m = self.table("#,A,B,C\nRow,0-3-4,straight,0-3-4\n")
+        self.assertEqual("0-3-4", m._too.loc[0, "B"])
+
+    def test_needs_values_on_both_sides(self):
+        for text in (
+            "#,A,B,C\nRow,straight,1-0-0,2-0-0\n",
+            "#,A,B,C\nRow,1-0-0,2-0-0,straight\n",
+            "#,A,B,C\nRow,1-0-0,,straight\n",
+            "#,A,B,C\nRow,straight,straight,straight\n",
+        ):
+            with self.assertRaises(ValueError, msg=text):
+                self.table(text)
+
+    def test_no_marker_no_change(self):
+        m = self.table("#,A,B\nRow,1-0-0,\n")
+        self.assertEqual("1-0-0", m._too.loc[0, "A"])

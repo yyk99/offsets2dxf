@@ -1,0 +1,52 @@
+# The model grid of offset_table.csv (Tabby Cat), in TOML. The lengths are in
+# millimetres, the unit of the table; heights are above the baseline.
+
+[table]
+unit = "mm"
+# the stern, station 12, is at x = 0; the bow is station 1
+bow_station = "1"
+
+# the stations 1..12 in the order of the columns, 510 mm apart (the drawing:
+# 510, 510, 305 near the stem; the stem itself is not used); station 12 at 0
+[stations]
+origin = 5610
+spacing = -510
+
+# name = { height, row }: the height above the baseline (given); row is the
+# table row with the half-breadths. DWL is the design waterline (KVL)
+[waterlines]
+"WL 1" = { height = 600, row = "Breadth WL I" }
+"WL 2" = { height = 700, row = "Breadth WL II" }
+"WL 3" = { height = 800, row = "Breadth WL III" }
+"WL 4" = { height = 900, row = "Breadth WL IV" }
+DWL = { height = 1000, row = "Breadth WL V" }
+"WL 6" = { height = 1150, row = "Breadth WL VI" }
+"WL 7" = { height = 1300, row = "Breadth WL VII" }
+"WL 8" = { height = 1450, row = "Breadth WL VIII" }
+
+# name = the half-breadth of the buttock line: 300 mm apart (confirmed)
+[buttocks]
+"B 1" = 300
+"B 2" = 600
+"B 3" = 900
+"B 4" = 1200
+
+# the diagonals D1 and D2 of the body plan: the line from the centerline at
+# `from` (breadth, height) through `through`, as dimensioned in the
+# construction midsection (konstruktivnyy_midel-shpangout_2.jpg): both start
+# 1700 mm above the baseline; D1 ends on the baseline 1100 mm from the
+# centerline, D2 ends 1850 mm from the centerline on the design waterline
+[diagonals]
+D1 = { row = "Diagonal D1", from = [0, 1700], through = [1100, 0] }
+D2 = { row = "Diagonal D2", from = [0, 1700], through = [1850, 1000] }
+
+# the rabbet line: the rows of the table with its heights and half-breadths
+[rabbet]
+height_row = "Height Rabbet"
+breadth_row = "Breadth Rabbet"
+
+# the plan view is drawn below the profile view: the base line of the
+# profile view and the centerline of the plan view
+[sheet]
+y_origins = [0, -2540]
+vertical_borders = [-3048, 2794]

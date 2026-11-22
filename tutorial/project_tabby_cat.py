@@ -41,10 +41,18 @@ import os
 MM = 1.0 / 25.4  # inches in a millimetre
 
 STATION_DISTANCE_MM = 510.0
-BUTTOCK_DISTANCE_MM = 300.0
-DWL_NUMBER = 5  # the design waterline is "WL V" of the table
-# heights of the waterlines WL 1 .. WL 8 above the baseline, mm
-WATERLINE_HEIGHTS_MM = [600, 700, 800, 900, 1000, 1150, 1300, 1450]
+# the waterlines: name -> (height above the baseline, mm; the table row with
+# the half-breadths). DWL is the design waterline, "WL V" of the table
+WATERLINES_MM = {
+    "WL 1": (600, "Breadth WL I"),
+    "WL 2": (700, "Breadth WL II"),
+    "WL 3": (800, "Breadth WL III"),
+    "WL 4": (900, "Breadth WL IV"),
+    "DWL": (1000, "Breadth WL V"),
+    "WL 6": (1150, "Breadth WL VI"),
+    "WL 7": (1300, "Breadth WL VII"),
+    "WL 8": (1450, "Breadth WL VIII"),
+}
 # the diagonals D1 and D2 of the body plan: (y0, x1, y1), mm. The lines run
 # from the centerline at y0 above the baseline to the point (x1, y1), as
 # dimensioned in the construction midsection (konstruktivnyy_midel-
@@ -52,7 +60,6 @@ WATERLINE_HEIGHTS_MM = [600, 700, 800, 900, 1000, 1150, 1300, 1450]
 # baseline 1100 mm from the centerline, D2 ends 1850 mm from the centerline on
 # the design waterline (1000 mm).
 DIAGONALS_MM = {"D1": (1700, 1100, 0), "D2": (1700, 1850, 1000)}
-ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII"]
 
 
 class ProjectTabbyCat(table_of_offsets.Model):
@@ -63,6 +70,7 @@ class ProjectTabbyCat(table_of_offsets.Model):
                 "../sample_data/tabby_cat/offset_table.csv",
             ),
             unit="mm",
+            meta=False,  # the grid is in this file; see project_tabby_cat_meta.py
         )
         self.set_bow_station("1")  # the stern (station 12) is at x = 0
         # the plan view is drawn below the profile view
@@ -83,22 +91,22 @@ class ProjectTabbyCat(table_of_offsets.Model):
         return 0
 
     def buttocks_positions(self):
+        """{name: half-breadth from the centerline} of the buttocks, 300 mm
+        apart"""
         return {
-            "B %d" % n: n * BUTTOCK_DISTANCE_MM * MM for n in range(1, 5)
+            "B 1": 300 * MM,
+            "B 2": 600 * MM,
+            "B 3": 900 * MM,
+            "B 4": 1200 * MM,
         }
 
     def waterline_row(self, name: str) -> str:
-        """the half-breadths of "WL n" are in the row "Breadth WL <roman n>";
-        DWL is WL V"""
-        n = DWL_NUMBER if name == "DWL" else int(name.split()[1])
-        return "Breadth WL " + ROMAN[n - 1]
+        """the table row with the half-breadths of the waterline"""
+        return WATERLINES_MM[name][1]
 
     def waterlines_positions(self):
         """{name: height above the baseline} of the waterlines WL 1 .. WL 8"""
-        return {
-            ("DWL" if n == DWL_NUMBER else "WL %d" % n): h * MM
-            for n, h in enumerate(WATERLINE_HEIGHTS_MM, 1)
-        }
+        return {name: height * MM for name, (height, _) in WATERLINES_MM.items()}
 
     def grid_y_origins(self):
         """the baseline of the profile view, the centerline of the plan view"""
@@ -200,11 +208,19 @@ class ProjectTabbyCat(table_of_offsets.Model):
                 dxf.add_red_polyline(self.loft_line_n(self.line_to_index(name)))
 
             # plan view
-            for name in (
-                ["Breadth Keel", "Breadth Rabbet"]
-                + ["Breadth WL " + r for r in ROMAN]
-                + ["Breadth Sheer"]
-            ):
+            for name in [
+                "Breadth Keel",
+                "Breadth Rabbet",
+                "Breadth WL I",
+                "Breadth WL II",
+                "Breadth WL III",
+                "Breadth WL IV",
+                "Breadth WL V",
+                "Breadth WL VI",
+                "Breadth WL VII",
+                "Breadth WL VIII",
+                "Breadth Sheer",
+            ]:
                 dxf.add_red_polyline(self.loft_line_n(self.line_to_index(name)))
 
             # the diagonals in the plan view, below its centerline
