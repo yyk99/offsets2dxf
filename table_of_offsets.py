@@ -364,19 +364,29 @@ def load_meta(path: str) -> dict:
 
     def good_point(p):
         """{ station, dx (optional), height | height_row,
-        breadth | breadth_row (optional) }"""
+        breadth | breadth_row (optional), edge (optional boolean) }"""
         if not isinstance(p, dict) or not isinstance(p.get("station"), str):
             return False
-        allowed = {"station", "dx", "height", "height_row", "breadth", "breadth_row"}
+        allowed = {
+            "station",
+            "dx",
+            "height",
+            "height_row",
+            "breadth",
+            "breadth_row",
+            "edge",
+        }
         if set(p) - allowed:
             return False
         if ("height" in p) == ("height_row" in p):  # exactly one
             return False
         if "breadth" in p and "breadth_row" in p:
             return False
+        if "edge" in p and not isinstance(p["edge"], bool):
+            return False
         return all(
             number(p[k]) if k in ("dx", "height", "breadth") else isinstance(p[k], str)
-            for k in set(p) - {"station"}
+            for k in set(p) - {"station", "edge"}
         )
 
     for section in EXTRA_POINT_SECTIONS:
@@ -385,7 +395,8 @@ def load_meta(path: str) -> dict:
             raise bad(
                 '[%s] extra_points must be a list of { station = "..", '
                 "dx = N (optional), height = N or height_row = \"..\", "
-                'breadth = N or breadth_row = ".." (optional) }' % section
+                'breadth = N or breadth_row = ".." (optional), '
+                "edge = true or false (optional) }" % section
             )
     if meta.get("rabbet", {}).get("extra_points") and "height_row" not in rabbet:
         # the points are merged into the line of the table
@@ -466,12 +477,16 @@ class BodyLines(dict):
     rabbet line and the keel line (see ``Model.body_sheer_polylines``,
     ``Model.body_rabbet_polylines`` and ``Model.body_keel_polylines``), ``chine``,
     the chine line (``Model.body_chine_polylines``), and ``extra_points``, the
-    extra points of the elements."""
+    extra points of the elements, ``edges``, the edges of the extra points."""
 
     sheer = ()
     rabbet = ()
     keel = ()
     chine = ()
+    # the edges of the extra points with ``edge = true``, ``[polyline, ...]``
+    # in the body plan: the horizontal line across the breadth of the element
+    # at the height of the point
+    edges = ()
     # the extra points of the elements, ``[(x, y, label), ...]`` in the body
     # plan (one for every side they are drawn on), see ``Model.extra_points``
     extra_points = ()
@@ -834,6 +849,35 @@ class Model:
             points.append((x, height, breadth))
         return points
 
+    def extra_point_edges(self, section: str):
+        """``[bool]``, parallel to ``extra_points(section)``: True for a
+        point of the file with ``edge = true`` (a sharp corner of the line
+        of the element), False if the attribute is false or missing."""
+        return [
+            bool(p.get("edge", False))
+            for p in self._meta.get(section, {}).get("extra_points", [])
+        ]
+
+    def edge_plan_lines(self, section: str = None):
+        """The edges of the extra points with ``edge = true`` in the plan
+        view: a point seen in the profile view at (x, height) is an edge of
+        the element across its breadth, in the plan view the line at x from
+        the plan centerline to the half-breadth of the point (the plan view
+        shows one half): ``[[(x, y0), (x, y0 + breadth)], ...]`` in inches.
+        ``section``: one of ``EXTRA_POINT_SECTIONS``, default all of them.
+        [] if there is no plan view."""
+        result = []
+        for name in [section] if section else EXTRA_POINT_SECTIONS:
+            y0 = self._plan_shift(name)
+            if y0 is None:
+                continue
+            for (x, _, b), edge in zip(
+                self.extra_points(name), self.extra_point_edges(name)
+            ):
+                if edge:
+                    result.append([(x, y0), (x, y0 + b)])
+        return result
+
     def rabbet_extra_points(self):
         """The extra points of the rabbet line, see ``extra_points``."""
         return self.extra_points("rabbet")
@@ -929,10 +973,13 @@ class Model:
         profile: bool = True,
         plan: bool = True,
         extra_points: bool = True,
+        edges: bool = True,
     ):
         """Draw the keel and the rabbet lines that the meta data file gives
         into ``dxf``: in the profile view (``profile``) and in the plan view
         (``plan``). Lines the file does not give are not drawn. With
+        ``edges`` the edges of the extra points with ``edge = true`` are
+        drawn in the plan view (``edge_plan_lines``). With
         ``extra_points`` the extra points of the elements (``E1``, ``E2``, ...
         for the rabbet, ``K1``, ... for the keel, see
         ``EXTRA_POINT_SECTIONS``) are marked in the views drawn."""
@@ -941,6 +988,8 @@ class Model:
             lines += [self.keel_profile_line(), self.rabbet_profile_line()]
         if plan:
             lines += [self.keel_plan_line(), self.rabbet_plan_line()]
+        if plan and edges:
+            lines += self.edge_plan_lines()
         for line in lines:
             if line:
                 dxf.add_red_polyline(line)
@@ -1487,7 +1536,9 @@ class Model:
         element_points = {"rabbet": dict(rabbet_points), "keel": dict(keel_points)}
         positions_all = dict(positions)
         extra_points = []  # (x, y, label of the extra point), per side drawn
+        edges = []  # the edges of the points with edge = true
         for section, prefix in EXTRA_POINT_SECTIONS.items():
+            edge_flags = self.extra_point_edges(section)
             for n, (x, height, breadth) in enumerate(self.extra_points(section), 1):
                 if sides == "half":
                     extra_flags = (False, True)
@@ -1506,6 +1557,14 @@ class Model:
                     extra_points.append((-breadth, height, label))
                 if extra_flags[1]:
                     extra_points.append((breadth, height, label))
+                if edge_flags[n - 1]:
+                    # across the breadth: the sides drawn, from the centerline
+                    edges.append(
+                        [
+                            (-breadth if extra_flags[0] else 0.0, height),
+                            (breadth if extra_flags[1] else 0.0, height),
+                        ]
+                    )
         sheer = self._joined_points(sheer_points, flags, positions)
         rabbet = self._joined_points(element_points["rabbet"], flags, positions_all)
         keel = self._joined_points(element_points["keel"], flags, positions_all)
@@ -1526,12 +1585,14 @@ class Model:
             keel = [[(x + x0, y) for x, y in p] for p in keel]
             chine = [[(x + x0, y) for x, y in p] for p in chine]
             extra_points = [(x + x0, y, label) for x, y, label in extra_points]
+            edges = [[(x + x0, y) for x, y in e] for e in edges]
         result = BodyLines(lines)
         result.sheer = sheer
         result.rabbet = rabbet
         result.keel = keel
         result.chine = chine
         result.extra_points = extra_points
+        result.edges = edges
         return result
 
     def _station_points(self, positions: dict, body_points: list) -> dict:
@@ -1684,6 +1745,7 @@ class Model:
         keel: bool = True,
         extra_points: bool = True,
         chine: bool = True,
+        edges: bool = True,
     ):
         """Draw the body lines (as returned by ``loft_body_lines``) into
         ``dxf``. With ``labels`` the station name is written above the top end
@@ -1692,7 +1754,8 @@ class Model:
         ``body_rabbet_polylines``, with ``keel`` the keel line, see
         ``body_keel_polylines``, with ``extra_points`` the extra points of the
         rabbet line are marked (``lines.extra_points``), with ``chine`` the
-        chine line, see ``body_chine_polylines``.
+        chine line, see ``body_chine_polylines``, with ``edges`` the edges of
+        the extra points with ``edge = true`` (``lines.edges``).
         """
         for station, polys in lines.items():
             for poly in polys:
@@ -1714,6 +1777,9 @@ class Model:
                 dxf.add_red_polyline(poly)
         if chine:
             for poly in self.body_chine_polylines(lines):
+                dxf.add_red_polyline(poly)
+        if edges:
+            for poly in getattr(lines, "edges", ()):
                 dxf.add_red_polyline(poly)
         if extra_points:
             for x, y, label in getattr(lines, "extra_points", ()):

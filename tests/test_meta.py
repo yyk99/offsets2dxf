@@ -888,3 +888,85 @@ class Test_ExtraPointsLayer(unittest.TestCase):
             {e.dxf.text: e.dxf.layer for e in msp.query("TEXT")},
         )
         self.assertEqual(["red"], [e.dxf.layer for e in msp.query("POLYLINE")])
+
+
+class Test_ExtraPointEdge(unittest.TestCase):
+    """the boolean attribute edge of an extra point: off by default"""
+
+    def model(self, points):
+        d = tempfile.mkdtemp()
+        csv = os.path.join(d, "t.csv")
+        with open(csv, "w") as f:
+            f.write("#,A,B\nHeight Sheer,1,1\n")
+        with open(os.path.join(d, "t.grid"), "w") as f:
+            f.write("[keel]\nextra_points = [%s]\n" % points)
+        return table_of_offsets.Model(csv)
+
+    def test_default_is_off(self):
+        m = self.model(
+            '{ station = "A", height = 1 },'
+            '{ station = "B", height = 2, edge = true },'
+            '{ station = "B", height = 3, edge = false }'
+        )
+        self.assertEqual([False, True, False], m.extra_point_edges("keel"))
+        self.assertEqual([], m.extra_point_edges("rabbet"))
+        self.assertEqual(3, len(m.extra_points("keel")))
+
+    def test_edge_must_be_boolean(self):
+        for value in ('"on"', "1", '"true"'):
+            with self.assertRaises(ValueError, msg=value):
+                self.model('{ station = "A", height = 1, edge = %s }' % value)
+
+
+class Test_EdgesInTheOrthogonalViews(unittest.TestCase):
+    """an extra point with edge = true is seen in the profile view; its edge
+    is seen in the plan view and in the body plan"""
+
+    MM = 1 / 25.4
+
+    def model(self):
+        d = tempfile.mkdtemp()
+        csv = os.path.join(d, "t.csv")
+        with open(csv, "w") as f:
+            f.write(
+                "#,A,B,C,D\nHeight Sheer,100,100,100,100\n"
+                "Breadth Sheer,300,300,300,300\n"
+            )
+        with open(os.path.join(d, "t.grid"), "w") as f:
+            f.write(
+                '[table]\nunit = "mm"\nbow_station = "D"\n[stations]\nspacing = 100.0\n'
+                "[sheet]\ny_origins = [0, -500]\n[keel]\nsiding = 40.0\n"
+                "extra_points = [\n"
+                '  { station = "A", dx = 50.0, height = 10, edge = true },\n'
+                '  { station = "C", dx = 20.0, height = 30, breadth = 5 },\n'
+                '  { station = "D", height = 50, edge = true },\n]\n'
+            )
+        return table_of_offsets.Model(csv)
+
+    def mm(self, lines):
+        return [[tuple(round(c / self.MM) for c in p) for p in e] for e in lines]
+
+    def test_plan(self):
+        # from the plan centerline to the half-breadth
+        self.assertEqual(
+            [[(50, -500), (50, -480)], [(300, -500), (300, -480)]],
+            self.mm(self.model().edge_plan_lines()),
+        )
+
+    def test_body_plan(self):
+        m = self.model()
+        half = m.loft_body_lines([("Breadth Sheer", "Height Sheer")], "raw", sides="half")
+        self.assertEqual(
+            [[(0, 10), (20, 10)], [(0, 50), (20, 50)]], self.mm(half.edges)
+        )
+        both = m.loft_body_lines([("Breadth Sheer", "Height Sheer")], "raw", sides="both")
+        self.assertEqual(
+            [[(-20, 10), (20, 10)], [(-20, 50), (20, 50)]], self.mm(both.edges)
+        )
+
+    def test_no_edge_by_default(self):
+        m = self.model()
+        m._meta["keel"]["extra_points"] = [
+            {"station": "A", "height": 10.0},
+        ]
+        self.assertEqual([], m.edge_plan_lines())
