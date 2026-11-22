@@ -2,7 +2,7 @@
 
 Source: the lines plan "Teoreticheskiy chertezh" with the table of the offsets
 ("Tablitsa plazovykh ordinat, mm"), see sample_data/tabby_cat/. The table is
-in millimetres (``unit="mm"``); the model works in inches.
+in millimetres (``unit="mm"``); the model works in the unit of the table.
 
 Table layout: stations ``1`` .. ``12``; rows named ``Height ...`` are heights
 above the baseline (Sheer, Buttock 1-4, Rabbet, Keel), rows named
@@ -38,8 +38,6 @@ from context import table_of_offsets
 
 import os
 
-MM = 1.0 / 25.4  # inches in a millimetre
-
 STATION_DISTANCE_MM = 510.0
 # the waterlines: name -> (height above the baseline, mm; the table row with
 # the half-breadths). DWL is the design waterline, "WL V" of the table
@@ -74,12 +72,12 @@ class ProjectTabbyCat(table_of_offsets.Model):
         )
         self.set_bow_station("1")  # the stern (station 12) is at x = 0
         # the plan view is drawn below the profile view
-        self._y_plan = -100.0
+        self._y_plan = -self.inches(100.0)  # 100 inches, in mm
 
     def station_positions(self):
         """The stations are 510 mm apart; the stern, station 12, is at x = 0."""
         return {
-            c: (12 - int(c)) * STATION_DISTANCE_MM * MM
+            c: (12 - int(c)) * STATION_DISTANCE_MM
             for c in self._too.columns
             if c != "#"
         }
@@ -94,10 +92,10 @@ class ProjectTabbyCat(table_of_offsets.Model):
         """{name: half-breadth from the centerline} of the buttocks, 300 mm
         apart"""
         return {
-            "B 1": 300 * MM,
-            "B 2": 600 * MM,
-            "B 3": 900 * MM,
-            "B 4": 1200 * MM,
+            "B 1": 300,
+            "B 2": 600,
+            "B 3": 900,
+            "B 4": 1200,
         }
 
     def waterline_row(self, name: str) -> str:
@@ -106,24 +104,21 @@ class ProjectTabbyCat(table_of_offsets.Model):
 
     def waterlines_positions(self):
         """{name: height above the baseline} of the waterlines WL 1 .. WL 8"""
-        return {name: height * MM for name, (height, _) in WATERLINES_MM.items()}
+        return {name: height for name, (height, _) in WATERLINES_MM.items()}
 
     def grid_y_origins(self):
         """the baseline of the profile view, the centerline of the plan view"""
         return [0.0, self._y_plan]
 
     def drawing_area_vertical_borders(self):
-        return (self._y_plan - 20, 110.0)
+        return (self._y_plan - self.inches(20.0), self.inches(110.0))
 
     def diagonal_row(self, name: str) -> str:
         return "Diagonal " + name
 
     def diagonals_positions(self):
         """{name: (y0, x1, y1)} of D1 and D2, see ``DIAGONALS_MM``"""
-        return {
-            name: (y0 * MM, x1 * MM, y1 * MM)
-            for name, (y0, x1, y1) in DIAGONALS_MM.items()
-        }
+        return {name: (y0, x1, y1) for name, (y0, x1, y1) in DIAGONALS_MM.items()}
 
     def keel_body_point(self):
         return ("Breadth Keel", "Height Keel")
@@ -134,7 +129,7 @@ class ProjectTabbyCat(table_of_offsets.Model):
     def body_points(self):
         """The (breadth, height) points of a body line, without the waterlines
         (``loft_body_lines`` adds them): a string is a table row, a number is
-        inches."""
+        the unit of the table (mm)."""
         body_points = [
             ("Breadth Sheer", "Height Sheer"),
             ("Breadth Rabbet", "Height Rabbet"),
@@ -155,7 +150,7 @@ class ProjectTabbyCat(table_of_offsets.Model):
     ):
         """Return {station: [polyline, ...]}: the body plan lines.
 
-        Points are (half-breadth, height above the baseline) in inches: the
+        Points are (half-breadth, height above the baseline) in the unit of the table: the
         sheer, the rabbet, the keel, the four buttocks and the waterlines
         WL 1 - WL 8.
         """

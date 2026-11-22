@@ -39,6 +39,7 @@ class Test_TableOfOffsets(unittest.TestCase):
     def test_Model(self):
         actual = table_of_offsets.Model(
             os.path.join(source_directory, "sample_data/offset_table.csv"),
+            unit="ftin",
             meta=False,
         )
         self.assertIsNotNone(actual._too)
@@ -126,10 +127,10 @@ if __name__ == "__main__":
 
 
 class Test_MultiValue(unittest.TestCase):
-    def test_offset_to_inches(self):
-        f = table_of_offsets.offset_to_inches
+    def test_offset_to_length(self):
+        f = table_of_offsets.offset_to_length
         with self.assertRaises(ValueError):
-            f("0-2-0 and 0-3-0")  # "error" is the default
+            f("0-2-0 and 0-3-0", "ftin")  # "error" is the default
         self.assertEqual(2.0, f("0-2-0 and 0-3-0", "ftin", "first"))
         self.assertEqual(2.0, f("0-2-0", "ftin", "first"))  # a plain cell
         self.assertEqual(50.0, f(" 50 and 60 ", "inch", "first"))
@@ -150,15 +151,15 @@ class Test_MultiValue(unittest.TestCase):
 
 
 class Test_Units(unittest.TestCase):
-    def test_offset_to_inches(self):
-        f = table_of_offsets.offset_to_inches
-        self.assertEqual(22.25, f("1-10-2"))  # the default is feet-inches-eighths
+    def test_offset_to_length(self):
+        f = table_of_offsets.offset_to_length
         self.assertEqual(22.25, f("1-10-2", "ftin"))
+        # only ftin is converted (to inches); a number is in the unit of the table
         self.assertEqual(2.5, f("2.5", "inch"))
-        self.assertEqual(24.0, f("2", "ft"))
-        self.assertAlmostEqual(50.0, f("1270", "mm"))
-        self.assertAlmostEqual(50.0, f("127", "cm"))
-        self.assertAlmostEqual(39.37007874, f("1", "m"))
+        self.assertEqual(2.0, f("2", "ft"))
+        self.assertEqual(1270.0, f("1270", "mm"))
+        self.assertEqual(127.0, f("127", "cm"))
+        self.assertEqual(1.0, f("1", "m"))
         with self.assertRaises(ValueError):
             f("1", "furlong")
         with self.assertRaises(ValueError):
@@ -166,9 +167,13 @@ class Test_Units(unittest.TestCase):
 
     def test_model_unit(self):
         csv = os.path.join(source_directory, "sample_data", "offset_table.csv")
-        model = table_of_offsets.Model(csv, meta=False)
+        model = table_of_offsets.Model(csv, unit="ftin", meta=False)
         self.assertEqual("ftin", model.offsets_unit())
-        self.assertEqual("inch", model.units())
+        self.assertEqual("inch", model.units())  # ftin is a format: inches
+        self.assertEqual(2.0, model.inches(2.0))
+        mm = table_of_offsets.Model(csv, unit="mm", meta=False)
+        self.assertEqual("mm", mm.units())
+        self.assertAlmostEqual(25.4, mm.inches(1.0))  # 1 inch is 25.4 mm
         with self.assertRaises(ValueError):
             table_of_offsets.Model(csv, unit="furlong")
 
@@ -215,9 +220,52 @@ class Test_OutputUnit(unittest.TestCase):
         with self.assertRaises(ValueError):
             table_of_offsets.DXF("x.dxf", unit="ftin")
 
+    def test_unit_is_required(self):
+        """the unit is never guessed"""
+        csv = os.path.join(source_directory, "sample_data", "offset_table.csv")
+        with self.assertRaises(ValueError):
+            table_of_offsets.Model(csv, meta=False)
+        # the meta data file gives it
+        self.assertEqual("ftin", table_of_offsets.Model(csv).offsets_unit())
+
+    def test_source_unit_and_measurement(self):
+        import ezdxf
+
+        def draw(unit, source_unit):
+            import tempfile
+
+            with tempfile.TemporaryDirectory() as tmp:
+                out = os.path.join(tmp, "u.dxf")
+                with table_of_offsets.DXF(
+                    out, unit=unit, source_unit=source_unit
+                ) as dxf:
+                    dxf.add_red_polyline([(0, 0), (1000, 2000)])
+                    dxf.text((0, 0), "A")
+                doc = ezdxf.readfile(out)
+            msp = doc.modelspace()
+            poly = [e for e in msp if e.dxftype() == "POLYLINE"][0]
+            text = [e for e in msp if e.dxftype() == "TEXT"][0]
+            return doc, [tuple(p)[:2] for p in poly.points()], text
+
+        # mm in, mm out: no conversion; the default text height is 1 inch
+        doc, pts, text = draw("mm", "mm")
+        self.assertEqual([(0, 0), (1000, 2000)], pts)
+        self.assertAlmostEqual(25.4, text.dxf.height)
+        self.assertEqual(1, doc.header["$MEASUREMENT"])
+        # mm in, inches out
+        doc, pts, text = draw("inch", "mm")
+        self.assertAlmostEqual(1000 / 25.4, pts[1][0])
+        self.assertAlmostEqual(1.0, text.dxf.height)
+        self.assertEqual(0, doc.header["$MEASUREMENT"])
+        doc, _, _ = draw("ft", "inch")
+        self.assertEqual(0, doc.header["$MEASUREMENT"])
+        for unit in ("cm", "m"):
+            doc, _, _ = draw(unit, "inch")
+            self.assertEqual(1, doc.header["$MEASUREMENT"])
+
     def test_model_output_unit(self):
         csv = os.path.join(source_directory, "sample_data", "offset_table.csv")
-        model = table_of_offsets.Model(csv, meta=False)  # ftin
+        model = table_of_offsets.Model(csv, unit="ftin", meta=False)  # ftin
         self.assertEqual("inch", model.output_unit())  # the same as the input
         model.set_output_unit("mm")
         self.assertEqual("mm", model.output_unit())
@@ -255,7 +303,7 @@ class Test_WaterlineBodyPoints(unittest.TestCase):
 
     def setUp(self):
         csv = os.path.join(source_directory, "sample_data", "offset_table.csv")
-        self.model = self.Model(csv, meta=False)
+        self.model = self.Model(csv, unit="ftin", meta=False)
 
     def test_waterline_body_points(self):
         self.assertEqual(
@@ -285,7 +333,8 @@ class Test_WaterlineBodyPoints(unittest.TestCase):
         csv = os.path.join(source_directory, "sample_data", "offset_table.csv")
         # the breadth of "LWL" is taken from the row "Sheer"
         self.assertEqual(
-            [("Sheer", 0.0), ('WL + 6"', 6.0)], Renamed(csv, meta=False).waterline_body_points()
+            [("Sheer", 0.0), ('WL + 6"', 6.0)],
+            Renamed(csv, unit="ftin", meta=False).waterline_body_points(),
         )
 
 
@@ -304,11 +353,12 @@ class Test_Diagonals(unittest.TestCase):
 
     def setUp(self):
         csv = os.path.join(source_directory, "sample_data", "offset_table.csv")
-        self.model = self.Model(csv, meta=False)
+        self.model = self.Model(csv, unit="ftin", meta=False)
 
     def test_default_has_no_diagonals(self):
         model = table_of_offsets.Model(
             os.path.join(source_directory, "sample_data", "offset_table.csv"),
+            unit="ftin",
             meta=False,
         )
         self.assertEqual({}, model.diagonals_positions())
@@ -377,7 +427,7 @@ class Test_Diagonals(unittest.TestCase):
         """the diagonal runs ``diagonal_extension()`` beyond the farthest hull
         point (0.8, 0.6 per inch along it)"""
         far = max(
-            self.model.offset_to_inches(c)
+            self.model.offset_to_length(c)
             for c in self.model._too.loc[
                 self.model.line_to_index("Diagonal 1"),
                 list(self.model.station_positions()),
@@ -423,6 +473,7 @@ class Test_BodyLine(unittest.TestCase):
     def setUp(self):
         self.model = table_of_offsets.Model(
             os.path.join(source_directory, "sample_data", "offset_table.csv"),
+            unit="ftin",
             meta=False,
         )
 
@@ -453,7 +504,9 @@ class Test_LoftLineRuns(unittest.TestCase):
         csv = os.path.join(d, "t.csv")
         with open(csv, "w") as f:
             f.write("#,A,B,C,D,E,F\nBreadth WL,1,2,,,5,6\nOther,,,,,,7\n")
-        m = table_of_offsets.Model(csv, unit="inch", meta=False)
+        with open(os.path.join(d, "t.meta"), "w") as f:
+            f.write("[table]\nunit = 'inch'\n[stations]\nspacing = 12\n")
+        m = table_of_offsets.Model(csv)
         runs = m.loft_line_n_runs(0)
         self.assertEqual(
             [[(0, 1), (12, 2)], [(48, 5), (60, 6)]],
@@ -471,20 +524,22 @@ class Test_StraightLine(unittest.TestCase):
         if grid is not None:
             with open(os.path.join(d, "t.grid"), "w") as f:
                 f.write(grid)
+        if unit is None and (grid is None or "unit" not in grid):
+            unit = "ftin"
         return table_of_offsets.Model(csv, unit=unit)
 
-    def test_inches_to_offset(self):
-        f = table_of_offsets.inches_to_offset
-        self.assertEqual("0-3-4", f(3.5))
-        self.assertEqual("1-2-3+", f(12 + 2 + 3 / 8 + 1 / 16))
-        self.assertEqual("0-0-0", f(0))
+    def test_length_to_offset(self):
+        f = table_of_offsets.length_to_offset
+        self.assertEqual("0-3-4", f(3.5, "ftin"))
+        self.assertEqual("1-2-3+", f(12 + 2 + 3 / 8 + 1 / 16, "ftin"))
+        self.assertEqual("0-0-0", f(0, "ftin"))
         # the round trip within 1/32"
         for v in (0.0, 0.01, 3.49, 17.77, 100.123):
-            back = table_of_offsets.TableOfOffsets.offset2double(f(v))
+            back = table_of_offsets.TableOfOffsets.offset2double(f(v, "ftin"))
             self.assertAlmostEqual(v, back, delta=1 / 32 + 1e-9)
-        self.assertAlmostEqual(25.4, float(f(1.0, "mm")))
+        self.assertAlmostEqual(1.0, float(f(1.0, "mm")))  # not converted
         with self.assertRaises(ValueError):
-            f(-1.0)
+            f(-1.0, "ftin")
 
     def test_ftin_by_station_positions(self):
         """the cells are interpolated by x, not by the column number"""
@@ -492,16 +547,13 @@ class Test_StraightLine(unittest.TestCase):
             "#,A,B,C,D\nRow,1-0-0,straight,straight,2-0-0\n",
             "[stations.positions]\nA = 0\nB = 1\nC = 3\nD = 4\n",
         )
-        self.assertEqual(
-            ["1-0-0", "1-3-0", "1-9-0", "2-0-0"], list(m._too.iloc[0, 1:])
-        )
+        self.assertEqual(["1-0-0", "1-3-0", "1-9-0", "2-0-0"], list(m._too.iloc[0, 1:]))
         # the offsets come out as inches
-        self.assertAlmostEqual(15.0, m.offset_to_inches(m._too.loc[0, "B"]))
+        self.assertAlmostEqual(15.0, m.offset_to_length(m._too.loc[0, "B"]))
 
     def test_mm_and_two_runs(self):
         m = self.table(
-            "#,A,B,C,D,E\nRow,10,straight,30,straight,50\n"
-            "Other,1,2,3,4,5\n",
+            "#,A,B,C,D,E\nRow,10,straight,30,straight,50\n" "Other,1,2,3,4,5\n",
             "[table]\nunit = 'mm'\n[stations]\nspacing = 1\n",
         )
         self.assertEqual(

@@ -28,7 +28,8 @@ class ProjectBlueMoon(table_of_offsets.Model):
             os.path.join(
                 os.path.dirname(__file__),
                 "../sample_data_too/offset_table_blue_moon.csv",
-            )
+            ),
+            unit="ftin",
         )
         self.set_bow_station("1")  # the stem; the stern (TRAN.) is at x = 0
         # fmt: off

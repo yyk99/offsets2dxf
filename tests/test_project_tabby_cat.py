@@ -12,7 +12,7 @@ import ezdxf
 source_directory = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(source_directory, "tutorial"))
 
-MM = 1.0 / 25.4
+MM = 1.0  # the model works in mm
 
 
 class Test_ProjectTabbyCat(unittest.TestCase):
@@ -55,8 +55,12 @@ class Test_ProjectTabbyCat(unittest.TestCase):
         (sheer,) = self.project.body_sheer_polylines(lines)
         self.assertEqual(11, len(sheer))
         # station 12 is at x = 0, station 2 is the 10th (the bow is station 1)
-        self.assertEqual((610, 2155), (round(sheer[-1][0] / MM), round(sheer[-1][1] / MM)))
-        self.assertEqual((1150, 1610), (round(sheer[0][0] / MM), round(sheer[0][1] / MM)))
+        self.assertEqual(
+            (610, 2155), (round(sheer[-1][0] / MM), round(sheer[-1][1] / MM))
+        )
+        self.assertEqual(
+            (1150, 1610), (round(sheer[0][0] / MM), round(sheer[0][1] / MM))
+        )
         # the highest point of the station 1 is not on the sheer line
         (poly,) = lines["1"]
         self.assertNotIn(poly[0], sheer)
@@ -107,7 +111,7 @@ class Test_ProjectTabbyCat(unittest.TestCase):
             row = self.project.diagonal_row(name)
             for station in ("2", "6", "12"):
                 distance = self.project.breadth_at(station, row)
-                (x, y) = [
+                x, y = [
                     (x, y)
                     for x, y, bs, _ in self.project.loft_body_line_sources(
                         station, self.project.body_points()
@@ -210,7 +214,9 @@ class Test_ProjectTabbyCat(unittest.TestCase):
             out = os.path.join(tmp, "station6.dxf")
             self.project.save_station_as(out, "6")
             texts = [
-                e.dxf.text for e in ezdxf.readfile(out).modelspace() if e.dxftype() == "TEXT"
+                e.dxf.text
+                for e in ezdxf.readfile(out).modelspace()
+                if e.dxftype() == "TEXT"
             ]
             self.assertIn("DWL (1000 mm)", texts)
             self.assertIn("B 4 (1200 mm)", texts)

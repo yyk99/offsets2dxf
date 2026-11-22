@@ -2,7 +2,7 @@
 
 Source: "Lofting a Boat" by Roger Kopanycia, see sample_data_too/book/
 (a private submodule; run ``git submodule update --init``). The table is in
-millimetres (``unit="mm"``); the model works in inches. The grid (stations,
+millimetres (``unit="mm"``); the model works in millimetres. The grid (stations,
 waterlines, buttocks, sheet layout) is in the meta data file
 sample_data_too/book/offset_table.grid, lengths in millimetres.
 
