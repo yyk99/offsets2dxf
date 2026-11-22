@@ -10,8 +10,12 @@ A table of offsets is a CSV file:
   to ``Model`` (``unit="mm"``, see ``TableOfOffsets.UNITS``); an empty cell
   means "no point".
 
-All lengths inside this module are in inches (see ``Model.units``), whatever
-the unit of the table.
+The unit of the table is always given (``Model(csv, unit=...)`` or ``[table]
+unit`` of the meta data file); it is never guessed. All lengths inside the
+model are in the unit of the table (see ``Model.units``); only the
+``feet-inches-eighths`` notation (``ftin``), which is a format and not a unit,
+is converted, to inches. The unit of the coordinates in the .dxf file is the
+output unit, ``DXF`` converts to it.
 
 Classes:
 
@@ -124,7 +128,8 @@ class TableOfOffsets:
         return d + delta
 
 
-# Units of the offsets in a table: the number of inches in one unit.
+# Units of the offsets in a table: the number of inches in one unit (to convert
+# the model to the output unit).
 # "ftin" is the special feet-inches-eighths notation, see offset2double.
 TableOfOffsets.UNITS = {
     "ftin": None,
@@ -136,7 +141,8 @@ TableOfOffsets.UNITS = {
 }
 
 
-# Units of the coordinates in a .dxf file: the unit of the table, except "ftin".
+# Units of the coordinates in a .dxf file: the unit of the table, except "ftin"
+# (a format; its lengths are inches).
 OUTPUT_UNITS = ("inch", "ft", "mm", "cm", "m")
 
 
@@ -149,18 +155,18 @@ MULTI_VALUE_POLICIES = ("error", "first")
 MULTI_VALUE_SEPARATOR = re.compile(r"\s+and\s+")
 
 
-def offset_to_inches(
-    value: str, unit: str = "ftin", multi_value: str = "error"
-) -> float:
-    """Convert an offset from a table cell to inches.
+def offset_to_length(value: str, unit: str, multi_value: str = "error") -> float:
+    """Convert an offset from a table cell to a length in the unit of the
+    table: ``"ftin"`` is converted to inches, the other units are plain
+    numbers and are not converted.
 
     multi_value - what to do with a cell of the form ``offset1 and offset2``,
     one of ``MULTI_VALUE_POLICIES``: ``"error"`` (default) raises ValueError,
     ``"first"`` uses ``offset1``.
 
-    unit - one of ``TableOfOffsets.UNITS``: ``"ftin"`` (default) is the
+    unit - one of ``TableOfOffsets.UNITS``: ``"ftin"`` is the
     ``feet-inches-eighths`` notation, the others are plain numbers, e.g.
-    ``offset_to_inches("1290", "mm")`` -> 50.79...
+    ``offset_to_length("1290", "mm")`` -> 1290.0
     Raises ValueError for an unknown unit or a malformed value.
     """
     if unit not in TableOfOffsets.UNITS:
@@ -176,7 +182,7 @@ def offset_to_inches(
         value = MULTI_VALUE_SEPARATOR.split(value.strip())[0]
     if unit == "ftin":
         return TableOfOffsets.offset2double(value)
-    return float(value) * TableOfOffsets.UNITS[unit]
+    return float(value)
 
 
 # The marker of a table cell that lies on the straight line between the
@@ -185,18 +191,18 @@ def offset_to_inches(
 STRAIGHT_LINE_MARKER = "straight"
 
 
-def inches_to_offset(value: float, unit: str = "ftin") -> str:
-    """The inverse of ``offset_to_inches``: the text of a table cell for
-    ``value`` inches. For ``"ftin"`` it is ``F-I-E`` rounded to 1/16" (a
+def length_to_offset(value: float, unit: str) -> str:
+    """The inverse of ``offset_to_length``: the text of a table cell for
+    ``value`` in the unit of the table (inches for ``ftin``). For ``"ftin"`` it is ``F-I-E`` rounded to 1/16" (a
     trailing ``+`` is 1/16"), e.g. 3.5 -> ``0-3-4``; ValueError for a negative
     value, which the notation cannot express. For the other units it is the
-    plain number in that unit."""
+    plain number."""
     if unit not in TableOfOffsets.UNITS:
         raise ValueError(
             "unknown unit %r, expected one of %s" % (unit, list(TableOfOffsets.UNITS))
         )
     if unit != "ftin":
-        return repr(round(value / TableOfOffsets.UNITS[unit], 6))
+        return repr(round(value, 6))
     if value < 0:
         raise ValueError("%r inches cannot be written as F-I-E" % (value,))
     sixteenths = round(value * 16)
@@ -246,52 +252,13 @@ def find_meta(csv_path: str):
     return found[0] if found else None
 
 
-def _meta_lengths_to_inches(meta: dict, k: float) -> dict:
-    """A copy of ``meta`` with every length multiplied by ``k`` (inches in a
-    unit of the table; 1 for ``ftin`` and ``inch``)."""
-    if k == 1.0:
-        return meta
-    meta = copy.deepcopy(meta)
-    st = meta.get("stations", {})
-    for key in ("origin", "spacing"):
-        if key in st:
-            st[key] *= k
-    for name in st.get("positions", {}):
-        st["positions"][name] *= k
-    for name in meta.get("buttocks", {}):
-        meta["buttocks"][name] *= k
-    for section in ("keel", "rabbet"):
-        if "siding" in meta.get(section, {}):
-            meta[section]["siding"] *= k
-    for section in EXTRA_POINT_SECTIONS:
-        for p in meta.get(section, {}).get("extra_points", []):
-            for key in ("dx", "height", "breadth"):
-                if key in p:
-                    p[key] *= k
-    for d in meta.get("waterlines", {}).values():
-        d["height"] *= k
-    for d in meta.get("diagonals", {}).values():
-        d["from"] = [v * k for v in d["from"]]
-        d["through"] = [v * k for v in d["through"]]
-    for end in ("from", "to"):
-        if end in meta.get("keel", {}):
-            meta["keel"][end]["height"] *= k
-    if "height" in meta.get("ghost_line", {}):
-        meta["ghost_line"]["height"] *= k
-    sheet = meta.get("sheet", {})
-    for key in ("y_origins", "vertical_borders"):
-        if key in sheet:
-            sheet[key] = [v * k for v in sheet[key]]
-    return meta
-
-
 def load_meta(path: str) -> dict:
     """Read and check a meta data file (TOML, see
     ``sample_data/offset_table.meta``) that describes the grid of a model:
     ``[table]``, ``[stations]``, ``[waterlines]``, ``[buttocks]``,
-    ``[diagonals]``, ``[keel]``, ``[rabbet]``, ``[ghost_line]`` and ``[sheet]``. Lengths are in the unit of the
-    table (``[table] unit``; inches for ``ftin``), the model converts them
-    to inches.
+    ``[diagonals]``, ``[keel]``, ``[rabbet]``, ``[ghost_line]`` and ``[sheet]``.
+    Lengths are in the unit of the table (``[table] unit``; inches for
+    ``ftin``), they are not converted.
     Raises ValueError for an unknown section or key or a malformed value."""
     with open(path, "rb") as f:
         try:
@@ -314,8 +281,8 @@ def load_meta(path: str) -> dict:
             unknown = set(content) - _META_KEYS[section]
             if unknown:
                 raise bad("unknown key %r in [%s]" % (sorted(unknown)[0], section))
-    unit = meta.get("table", {}).get("unit", "ftin")
-    if unit not in TableOfOffsets.UNITS:
+    unit = meta.get("table", {}).get("unit")
+    if unit is not None and unit not in TableOfOffsets.UNITS:
         raise bad("unknown unit %r" % (unit,))
     policy = meta.get("table", {}).get("multi_value", "error")
     if policy not in MULTI_VALUE_POLICIES:
@@ -344,7 +311,7 @@ def load_meta(path: str) -> dict:
                 or not isinstance(e["station"], str)
                 or not number(e["height"])
             ):
-                raise bad("[keel] %s must be { station = \"..\", height = N }" % end)
+                raise bad('[keel] %s must be { station = "..", height = N }' % end)
     for section in ("keel", "rabbet"):
         value = meta.get(section, {}).get("siding")
         if "siding" in meta.get(section, {}) and (not number(value) or value <= 0):
@@ -394,7 +361,7 @@ def load_meta(path: str) -> dict:
         if not isinstance(points, list) or not all(map(good_point, points)):
             raise bad(
                 '[%s] extra_points must be a list of { station = "..", '
-                "dx = N (optional), height = N or height_row = \"..\", "
+                'dx = N (optional), height = N or height_row = "..", '
                 'breadth = N or breadth_row = ".." (optional), '
                 "edge = true or false (optional) }" % section
             )
@@ -407,7 +374,9 @@ def load_meta(path: str) -> dict:
                 raise bad("%s %r must be a table" % (section, name))
             unknown = set(entry) - _META_ENTRY_KEYS[section]
             if unknown:
-                raise bad("unknown key %r in %s %r" % (sorted(unknown)[0], section, name))
+                raise bad(
+                    "unknown key %r in %s %r" % (sorted(unknown)[0], section, name)
+                )
     for name, entry in meta.get("waterlines", {}).items():
         if not number(entry.get("height")):
             raise bad("waterline %r needs a number height" % name)
@@ -440,7 +409,7 @@ class DiagonalPoint:
     """A point of a body line given by a diagonal: the table cell is the
     distance along the diagonal from its first point ``(0, y0)`` on the
     centerline toward its second point ``(x1, y1)``. Heights are above the base
-    line, all in inches. It can be used as an item of ``body_points`` (see
+    line, all in the unit of the model. It can be used as an item of ``body_points`` (see
     ``Model.diagonals_positions``).
 
     ``row`` is the name of the table row with the distances.
@@ -462,7 +431,7 @@ class DiagonalPoint:
 class GhostPoint:
     """A point of a body line on the "ghost line": the half-breadth is the
     second value of a table cell ``offset1 and offset2`` of the row ``row``,
-    the height is ``height`` (inches above the base line). A station whose cell
+    the height is ``height`` (above the base line). A station whose cell
     has no second value has no such point. It can be used as an item of
     ``body_points`` (see ``Model.ghost_line``)."""
 
@@ -523,8 +492,10 @@ class Model:
         unit - the unit of the offsets in the table, one of
         ``TableOfOffsets.UNITS``: ``"ftin"`` (feet-inches-eighths),
         ``"inch"``, ``"ft"``, ``"mm"``, ``"cm"`` or ``"m"``. Everything the
-        model returns is in inches. The default is the unit of the meta data
-        file, else ``"ftin"``.
+        model returns is in this unit (inches for ``"ftin"``, see ``units``).
+        The unit is never guessed: it is the argument or ``[table] unit`` of
+        the meta data file (if both are given they must agree), else
+        ValueError.
 
         meta - the meta data file that describes the grid (see ``load_meta``):
         a path, ``None`` (default) for the file next to the CSV with the
@@ -539,7 +510,13 @@ class Model:
         self._meta = load_meta(meta) if meta else {}
         meta_table = self._meta.get("table", {})
         if unit is None:
-            unit = meta_table.get("unit", "ftin")
+            unit = meta_table.get("unit")
+            if unit is None:
+                raise ValueError(
+                    "the unit of the table is not given: pass unit= or set "
+                    "[table] unit in the meta data file; one of %s"
+                    % list(TableOfOffsets.UNITS)
+                )
         elif "unit" in meta_table and unit != meta_table["unit"]:
             raise ValueError(
                 "unit %r does not agree with the meta data file (%r)"
@@ -551,12 +528,9 @@ class Model:
                 % (unit, list(TableOfOffsets.UNITS))
             )
         self._unit = unit
-        self._meta = _meta_lengths_to_inches(
-            self._meta, TableOfOffsets.UNITS[unit] or 1.0
-        )
         self._multi_value = meta_table.get("multi_value", "error")
         self._filename_csv = _filename_csv
-        # read the cells as text: the numbers are converted by offset_to_inches
+        # read the cells as text: they are converted by offset_to_length
         self._too = pandas.read_csv(self._filename_csv, dtype=str)
         self._under_waterline = {}
         self._resolve_straight_lines()
@@ -573,7 +547,7 @@ class Model:
         to the right, interpolated by the x of the stations
         (``station_positions``). The run of marked cells must have a value
         right before and right after it, else ValueError. The values are
-        written in the unit of the table (see ``inches_to_offset``)."""
+        written in the unit of the table (see ``length_to_offset``)."""
         names = [c for c in self._too.columns if c != "#"]
         marked = any(
             self._too.loc[r, c] == STRAIGHT_LINE_MARKER
@@ -588,7 +562,7 @@ class Model:
             cell = self._too.loc[row, name]
             if type(cell) is not str or cell == STRAIGHT_LINE_MARKER:
                 return None
-            return self.offset_to_inches(cell)
+            return self.offset_to_length(cell)
 
         for row in self._too.index:
             i = 0
@@ -622,7 +596,7 @@ class Model:
                     raise ValueError("%s: the end stations are at the same x" % what)
                 for k in range(i, j + 1):
                     t = (positions[names[k]] - x0) / (x1 - x0)
-                    self._too.loc[row, names[k]] = inches_to_offset(
+                    self._too.loc[row, names[k]] = length_to_offset(
                         v0 + t * (v1 - v0), self._unit
                     )
                 i = j + 1
@@ -648,16 +622,24 @@ class Model:
         self._under_waterline = d
 
     def units(self):
-        """Name of the length unit used for all returned values."""
-        return "inch"
+        """Name of the length unit used for all returned values: the unit of
+        the table, ``"inch"`` for ``ftin``."""
+        return "inch" if self._unit == "ftin" else self._unit
+
+    def inches(self, value: float) -> float:
+        """``value`` inches in the unit of the model; for the sizes of the
+        drawing furniture (margins, text heights, ...) that are given in
+        inches whatever the unit of the table."""
+        return value / TableOfOffsets.UNITS[self.units()]
 
     def offsets_unit(self):
         """The unit of the offsets in the CSV table (the ``unit`` argument)."""
         return self._unit
 
-    def offset_to_inches(self, value: str) -> float:
-        """Convert a cell of the table to inches, using the unit of the table."""
-        return offset_to_inches(value, self._unit, self._multi_value)
+    def offset_to_length(self, value: str) -> float:
+        """Convert a cell of the table to a length in the unit of the model
+        (``units``)."""
+        return offset_to_length(value, self._unit, self._multi_value)
 
     def set_multi_value_policy(self, policy: str):
         """What to do with a cell that holds several values, ``offset1 and
@@ -690,8 +672,9 @@ class Model:
 
     def open_dxf(self, filename_dxf: str):
         """A ``DXF`` to write ``filename_dxf`` in the output unit. The model
-        itself works in inches; the coordinates are converted when drawn."""
-        return DXF(filename_dxf, unit=self.output_unit())
+        works in its own unit (``units``); the coordinates are converted when
+        drawn."""
+        return DXF(filename_dxf, unit=self.output_unit(), source_unit=self.units())
 
     def station_positions(self):
         """(virtual) Return ``{station_name: x_position}`` for every station column.
@@ -699,10 +682,12 @@ class Model:
         Station names are just labels (``"1"``, ``"T"``, ``"AP"``, ``"1A"``);
         the position of a station is derived from its place in the list of
         the columns of the table: the n-th station (from 0) is at
-        ``origin + n * spacing`` inches. ``origin`` (default 0) and
-        ``spacing`` (default 12; may be negative, to number the stations from
+        ``origin + n * spacing``. ``origin`` (default 0) and
+        ``spacing`` (may be negative, to number the stations from
         the bow, whose x is the greater) are those of ``[stations]`` of the
-        meta data file. ``positions`` of ``[stations]`` gives the x of
+        meta data file. There is a default spacing only for ``ftin`` tables
+        (12 inches, one foot); for any other unit ``spacing`` or ``positions``
+        must be given (ValueError). ``positions`` of ``[stations]`` gives the x of
         stations by name, for tables whose stations are not equally spaced; the
         others use ``origin`` and ``spacing``. Override this method for other
         layouts. Raises ValueError for a station that has no position.
@@ -716,7 +701,8 @@ class Model:
                 "[stations] positions: %r is not a station of the table" % unknown[0]
             )
         origin = stations.get("origin", 0)
-        spacing = stations.get("spacing", None if explicit else 12)
+        default = 12 if self._unit == "ftin" and not explicit else None
+        spacing = stations.get("spacing", default)
         station_positions = {}
         for n, c in enumerate(names):
             if c in explicit:
@@ -724,7 +710,10 @@ class Model:
             elif spacing is not None:
                 station_positions[c] = origin + n * spacing
             else:
-                raise ValueError("no position for station %r" % (c,))
+                raise ValueError(
+                    "no position for station %r: give spacing or positions in "
+                    "[stations] (the default spacing exists only for ftin)" % (c,)
+                )
         return station_positions
 
     def buttocks_positions(self):
@@ -742,7 +731,7 @@ class Model:
 
     def siding(self, name: str, default: float = None) -> float:
         """The siding of the element ``name`` (``"keel"`` or ``"rabbet"``), in
-        inches: its breadth, the full width across the centerline. From the
+        (unit of the model): its breadth, the full width across the centerline. From the
         key ``siding`` of the section ``[keel]`` or ``[rabbet]`` of the meta
         data file; ``default`` if the file does not give it. The
         half-breadth of the element is half of it."""
@@ -751,7 +740,7 @@ class Model:
 
     def keel_line(self):
         """The keel in the profile view, a straight line:
-        ``((x0, y0), (x1, y1))`` in inches, from ``[keel]`` of the meta data
+        ``((x0, y0), (x1, y1))`` in the unit of the model, from ``[keel]`` of the meta data
         file (``from`` and ``to``: the station and the height above the
         datum), or None if the file has none. A station that is not in the
         table is a ValueError."""
@@ -769,7 +758,7 @@ class Model:
 
     def keel_points(self):
         """The points ``[(x, height, breadth)]`` of the keel line in the
-        profile view (inches): the straight line of ``from`` and ``to`` of
+        profile view (unit of the model): the straight line of ``from`` and ``to`` of
         ``[keel]`` (the half-breadth is half of its ``siding``, 0 if there is
         none) merged by x with its ``extra_points``; without the line the
         extra points, in the order of the file. [] if the file gives
@@ -785,7 +774,7 @@ class Model:
 
     def keel_point_at(self, station: str):
         """The keel point of the body line of ``station``: ``(half-breadth,
-        height)`` in inches, interpolated along the keel line
+        height)`` in the unit of the model, interpolated along the keel line
         (``keel_points``) at the x of the station; None if the file gives no
         keel line or the station is beyond its ends. The body line of a
         station with a keel point goes down to it."""
@@ -814,7 +803,7 @@ class Model:
     def extra_points(self, section: str):
         """The extra points of the element ``section`` (one of
         ``EXTRA_POINT_SECTIONS``) from ``extra_points`` of its section of the
-        meta data file: ``[(x, height, breadth)]`` in inches, in the order of
+        meta data file: ``[(x, height, breadth)]`` in the unit of the model, in the order of
         the file. Geometry that is not in the table of offsets (e.g. the
         shape of a stem or a keel). A point is given by the XY coordinates of
         the profile view (``dx`` right of a station, default 0, and
@@ -863,7 +852,7 @@ class Model:
         view: a point seen in the profile view at (x, height) is an edge of
         the element across its breadth, in the plan view the line at x from
         the plan centerline to the half-breadth of the point (the plan view
-        shows one half): ``[[(x, y0), (x, y0 + breadth)], ...]`` in inches.
+        shows one half): ``[[(x, y0), (x, y0 + breadth)], ...]`` in the unit of the model.
         ``section``: one of ``EXTRA_POINT_SECTIONS``, default all of them.
         [] if there is no plan view."""
         result = []
@@ -964,8 +953,9 @@ class Model:
     def _plot_extra_point(self, dxf: object, xy: tuple, label: str):
         """A marker (a circle) and the label of an extra point at ``xy``, both
         in the layer ``EXTRA_POINT_LAYER``."""
-        dxf.add_circle(xy, 0.75, layer=EXTRA_POINT_LAYER)
-        dxf.text((xy[0] + 1, xy[1] + 1), label, layer=EXTRA_POINT_LAYER)
+        inch = self.inches
+        dxf.add_circle(xy, inch(0.75), layer=EXTRA_POINT_LAYER)
+        dxf.text((xy[0] + inch(1), xy[1] + inch(1)), label, layer=EXTRA_POINT_LAYER)
 
     def plot_keel_and_rabbet(
         self,
@@ -996,9 +986,7 @@ class Model:
         if extra_points:
             for section, prefix in EXTRA_POINT_SECTIONS.items():
                 shift = self._plan_shift(section)
-                for n, (x, height, breadth) in enumerate(
-                    self.extra_points(section), 1
-                ):
+                for n, (x, height, breadth) in enumerate(self.extra_points(section), 1):
                     if profile:
                         self._plot_extra_point(dxf, (x, height), "%s%d" % (prefix, n))
                     if plan and shift is not None:
@@ -1010,15 +998,13 @@ class Model:
         """(virtual) Return a dictionary: ``{name: height}``. From
         ``[waterlines]`` of the meta data file, if any."""
         if "waterlines" in self._meta:
-            return {
-                k: float(v["height"]) for k, v in self._meta["waterlines"].items()
-            }
+            return {k: float(v["height"]) for k, v in self._meta["waterlines"].items()}
         print("TODO: please define waterline_positions()")
         return {}
 
     def diagonals_positions(self):
         """(virtual) The diagonals of the body plan: ``{name: (y0, x1, y1)}``,
-        inches, heights above the base line. A diagonal is the straight line
+        the unit of the model, heights above the base line. A diagonal is the straight line
         from the point ``(0, y0)`` on the centerline through the point
         ``(x1, y1)``; the table gives, per station, the distance along it from
         ``(0, y0)`` to the hull. From ``[diagonals]`` of the meta data file;
@@ -1054,7 +1040,7 @@ class Model:
     def loft_line_n(self, n: int):
         """Return the polyline ``[(x, y), ...]`` for the n-th table row.
 
-        x is the station position, y is the offset in inches (negated by
+        x is the station position, y is the offset in the unit of the model (negated by
         ``offset_sign``, shifted by ``base_offset``). Stations with an empty
         cell are skipped. Points keep the column order of the CSV.
         """
@@ -1069,7 +1055,7 @@ class Model:
                 s = self.offset_sign(pos, line_name)
                 off = self.base_offset(line_name)
                 poly_line.append(
-                    (stations[pos], s * self.offset_to_inches(offset) + off)
+                    (stations[pos], s * self.offset_to_length(offset) + off)
                 )
 
         return poly_line
@@ -1090,7 +1076,7 @@ class Model:
                 s = self.offset_sign(pos, line_name)
                 off = self.base_offset(line_name)
                 runs[-1].append(
-                    (stations[pos], s * self.offset_to_inches(offset) + off)
+                    (stations[pos], s * self.offset_to_length(offset) + off)
                 )
             elif runs[-1]:
                 runs.append([])
@@ -1141,31 +1127,32 @@ class Model:
         point (``diagonal_segments``).
         """
 
+        inch = self.inches
         stations = self.station_positions()
         xx = stations.values()
 
-        right = max(xx) + 12
+        right = max(xx) + inch(12)
         if profile_end_x is not None:
             right = max(right, profile_end_x)
 
         # Draw central line(s); the base line (the first one) is extended
         for i, y in enumerate(self.grid_y_origins()):
-            y_right = right if i == 0 else max(xx) + 12
-            dxf.add_grid_polyline([(min(xx) - 12, y), (y_right, y)])
+            y_right = right if i == 0 else max(xx) + inch(12)
+            dxf.add_grid_polyline([(min(xx) - inch(12), y), (y_right, y)])
 
         if body_centerline is not None:
             x, bottom_y, top_y = body_centerline
             dxf.add_grid_polyline([(x, bottom_y), (x, top_y)])
-            dxf.text((x + 1, top_y - 2), "CL")
+            dxf.text((x + inch(1), top_y - inch(2)), "CL")
             for name, buttock_xs in (body_buttocks or {}).items():
                 for bx in buttock_xs:
                     dxf.add_grid_polyline([(bx, bottom_y), (bx, top_y)])
-                    dxf.text((bx + 1, top_y - 2), name)
+                    dxf.text((bx + inch(1), top_y - inch(2)), name)
 
         for name, segments in (body_diagonals or {}).items():
             for p0, p1 in segments:
                 dxf.add_grid_polyline([p0, p1])
-                dxf.text((p1[0] + 1, p1[1] + 1), name)
+                dxf.text((p1[0] + inch(1), p1[1] + inch(1)), name)
 
         # draw station lines
         bottom_y, top_y = self.drawing_area_vertical_borders()
@@ -1177,15 +1164,15 @@ class Model:
             # place labels offset-ed by (1,1) from the waterline and
             # the station vertical intersection
             for s, x in stations.items():
-                dxf.text((x + 1, y + 1), s)
+                dxf.text((x + inch(1), y + inch(1)), s)
 
         # waterlines
         wl_right = right
         for wl, wl_y in self.waterlines_positions().items():
             print("Waterline: ", wl, "at", wl_y)
-            dxf.add_grid_polyline([(min(xx) - 12, wl_y), (wl_right, wl_y)])
-            dxf.text((min(xx) - 12 + 1, wl_y + 1), wl)
-            dxf.text((wl_right - 1, wl_y + 1), wl)
+            dxf.add_grid_polyline([(min(xx) - inch(12), wl_y), (wl_right, wl_y)])
+            dxf.text((min(xx) - inch(12) + inch(1), wl_y + inch(1)), wl)
+            dxf.text((wl_right - inch(1), wl_y + inch(1)), wl)
 
         # buttocks
         buttocks_origin = 0
@@ -1194,15 +1181,21 @@ class Model:
         for wl, wl_y in self.buttocks_positions().items():
             print("Buttocks line: ", wl, "at", wl_y)
             wl_y += buttocks_origin
-            dxf.add_grid_polyline([(min(xx) - 12, wl_y), (max(xx) + 12, wl_y)])
-            dxf.text((min(xx) - 12 + 1, wl_y + 1), wl)
-            dxf.text((max(xx) + 12 - 1, wl_y + 1), wl)
+            dxf.add_grid_polyline(
+                [(min(xx) - inch(12), wl_y), (max(xx) + inch(12), wl_y)]
+            )
+            dxf.text((min(xx) - inch(12) + inch(1), wl_y + inch(1)), wl)
+            dxf.text((max(xx) + inch(12) - inch(1), wl_y + inch(1)), wl)
 
     def drawing_area_vertical_borders(self):
         """(virtual) return (bottom, top); ``vertical_borders`` of ``[sheet]``
         of the meta data file, if any"""
         borders = self._meta.get("sheet", {}).get("vertical_borders")
-        return tuple(map(float, borders)) if borders else (-12 * 10, 12 * 10)
+        return (
+            tuple(map(float, borders))
+            if borders
+            else (-self.inches(120), self.inches(120))
+        )
 
     def grid_y_origins(self):
         """(virtual) returns y-coordinate list of the horizontal lines in the
@@ -1218,7 +1211,7 @@ class Model:
         station_id - e.g. "5"
         body_points - list of (breadth, height) pairs. Each item is either
             a line name (looked up in the table at station_id) or a number
-            (inches, used as is), e.g.
+            (used as is), e.g.
             [("SHEER", "LWL to SHEER"), ("WL 1A", 9.0), (36.0, "BASE TO B-3")]
         A plain string is used as both the breadth and the height line name.
         skip_missing - skip points whose table cell is empty at this station
@@ -1237,7 +1230,7 @@ class Model:
     ) -> list:
         """The points of ``loft_body_line`` with their sources:
         ``[(x, y, breadth_source, height_source)]``, a source is the name of the
-        table row or the number (inches) the coordinate comes from."""
+        table row or the number (unit of the model) the coordinate comes from."""
         points = []
 
         for pp in body_points:
@@ -1284,7 +1277,7 @@ class Model:
         source of every coordinate: ``[(x, y, breadth_source, height_source)]``,
         from the top down. The points are those of ``loft_body_lines``: the
         ``body_points`` and the waterlines that are in the table. A source is
-        the name of the table row or the number (inches) of the point.
+        the name of the table row or the number (unit of the model) of the point.
         """
         points = self._body_point_sources(
             station_id,
@@ -1297,20 +1290,19 @@ class Model:
         points.sort(key=lambda pt: -pt[1])
         return points
 
-    def format_length(self, inches: float) -> str:
-        """A length for a label, in the unit of the table (inches for the
-        feet-inches-eighths tables), e.g. ``"500 mm"``."""
-        factor = TableOfOffsets.UNITS[self._unit]
-        if factor is None:
-            return "%g in" % round(inches, 3)
-        return "%g %s" % (round(inches / factor, 3), self._unit)
+    def format_length(self, length: float) -> str:
+        """A length (in the unit of the model) for a label, with the unit of
+        the table (``in`` for the feet-inches-eighths tables), e.g. ``"500
+        mm"``."""
+        unit = "in" if self._unit == "ftin" else self._unit
+        return "%g %s" % (round(length, 3), unit)
 
     def plot_annotated_body_line(
         self,
         dxf: object,
         station_id: str,
         body_points: list,
-        text_height: float = 2.0,
+        text_height: float = None,
         point_text_height: float = None,
     ):
         """Draw the body line of one station for checking the data: the
@@ -1329,6 +1321,9 @@ class Model:
         points = self.loft_body_line_sources(station_id, body_points)
         if not points:
             return
+        inch = self.inches
+        if text_height is None:
+            text_height = inch(2.0)
         if point_text_height is None:
             point_text_height = text_height
 
@@ -1341,16 +1336,18 @@ class Model:
         buttocks = self.buttocks_positions()
         y_min = min([0.0] + ys + list(waterlines.values()))
         y_max = max([0.0] + ys + list(waterlines.values()))
-        left, right = -30.0, max(xs + list(buttocks.values())) + 10.0
+        left, right = -inch(30.0), max(xs + list(buttocks.values())) + inch(10.0)
 
-        dxf.add_grid_polyline([(0, y_min - 10), (0, y_max + 10)])
-        dxf.text((1, y_max + 10), "station " + station_id, height=text_height)
+        dxf.add_grid_polyline([(0, y_min - inch(10)), (0, y_max + inch(10))])
+        dxf.text(
+            (inch(1), y_max + inch(10)), "station " + station_id, height=text_height
+        )
 
         # the base line and the waterlines, named on the left
         for name, y in [("baseline", 0.0)] + list(waterlines.items()):
             dxf.add_grid_polyline([(left, y), (right, y)])
             dxf.text(
-                (left - 1, y + 0.5),
+                (left - inch(1), y + inch(0.5)),
                 "%s (%s)" % (name, self.format_length(y)),
                 align="right",
                 height=text_height,
@@ -1358,9 +1355,9 @@ class Model:
 
         # the buttocks, named on the top
         for name, x in buttocks.items():
-            dxf.add_grid_polyline([(x, y_min - 10), (x, y_max + 10)])
+            dxf.add_grid_polyline([(x, y_min - inch(10)), (x, y_max + inch(10))])
             dxf.text(
-                (x, y_max + 11),
+                (x, y_max + inch(11)),
                 "%s (%s)" % (name, self.format_length(x)),
                 align="center",
                 height=text_height,
@@ -1368,11 +1365,11 @@ class Model:
         for name, segments in self.diagonal_segments().items():
             for p0, p1 in segments:
                 dxf.add_grid_polyline([p0, p1])
-                dxf.text((p1[0] + 1, p1[1] + 1), name, height=text_height)
+                dxf.text((p1[0] + inch(1), p1[1] + inch(1)), name, height=text_height)
         dxf.add_red_polyline([(x, y) for x, y, _, _ in points])
         for n, (x, y, breadth_src, height_src) in enumerate(points, 1):
             dxf.text(
-                (x + 1, y + 0.5),
+                (x + inch(1), y + inch(0.5)),
                 "%d (%s, %s)" % (n, source(breadth_src), source(height_src)),
                 height=point_text_height,
             )
@@ -1384,7 +1381,7 @@ class Model:
         self,
         body_points: list,
         placement: str = "max_breadth",
-        gap: float = 24.0,
+        gap: float = None,
         sides: str = None,
         bow_station: str = None,
         keel_link: bool = True,
@@ -1423,7 +1420,7 @@ class Model:
 
         - ``"max_breadth"`` (default): on the station with the greatest
           breadth, i.e. in the middle of the profile view;
-        - ``"right"``: ``gap`` inches to the right of the last station, clear
+        - ``"right"``: ``gap`` (default 24 inches) to the right of the last station, clear
           of the profile view (the left half, if any, is clear as well);
         - ``"raw"``: no shift, the centerline is at x = 0.
         """
@@ -1470,9 +1467,7 @@ class Model:
         if keel_from_line:
             # the keel line of the meta data file: its point of every station
             keel_points = {
-                st: pt
-                for st in positions
-                if (pt := self.keel_point_at(st)) is not None
+                st: pt for st in positions if (pt := self.keel_point_at(st)) is not None
             }
         for station in positions:
             poly = self.loft_body_line(station, body_points, skip_missing=True)
@@ -1667,7 +1662,7 @@ class Model:
         return "split" if placement == "max_breadth" else "half"
 
     def body_plan_grid_options(
-        self, lines: dict, sides: str = None, margin: float = 12.0
+        self, lines: dict, sides: str = None, margin: float = None
     ):
         """Keyword arguments for ``plot_grid`` for a body plan placed to the
         right of the profile view (``lines`` as returned by ``loft_body_lines``
@@ -1677,6 +1672,8 @@ class Model:
         on the right of the centerline for ``sides="half"``, on both sides
         otherwise.
         """
+        if margin is None:
+            margin = self.inches(12.0)
         polylines = self.body_polylines(lines)
         if not polylines or self.body_plan_centerline_x is None:
             return {}
@@ -1696,7 +1693,7 @@ class Model:
             "body_diagonals": self.diagonal_segments(cl, sides != "half"),
         }
 
-    def plot_body_plan_grid(self, dxf: object, lines: dict, margin: float = 12.0):
+    def plot_body_plan_grid(self, dxf: object, lines: dict, margin: float = None):
         """Draw the grid of a body plan alone (no profile view) into ``dxf``:
         the base line, the waterlines (``waterlines_positions``) with their
         names, the vertical centerline ``CL``, the buttock lines
@@ -1705,6 +1702,9 @@ class Model:
         buttocks are drawn on both sides of the centerline if any body line is
         to the left of it, otherwise on the right only.
         """
+        if margin is None:
+            margin = self.inches(12.0)
+        inch = self.inches
         polylines = self.body_polylines(lines)
         if not polylines or self.body_plan_centerline_x is None:
             return
@@ -1720,20 +1720,20 @@ class Model:
 
         for name, y in [("baseline", base_y)] + list(waterlines.items()):
             dxf.add_grid_polyline([(left, y), (right, y)])
-            dxf.text((left + 1, y + 1), name)
-            dxf.text((right - 1, y + 1), name, align="right")
+            dxf.text((left + inch(1), y + inch(1)), name)
+            dxf.text((right - inch(1), y + inch(1)), name, align="right")
 
         dxf.add_grid_polyline([(cl, bottom), (cl, top)])
-        dxf.text((cl + 1, top - 2), "CL")
+        dxf.text((cl + inch(1), top - inch(2)), "CL")
         both = min(xs) < cl
         for name, offset in self.buttocks_positions().items():
             for bx in [cl + offset] + ([cl - offset] if both else []):
                 dxf.add_grid_polyline([(bx, bottom), (bx, top)])
-                dxf.text((bx + 1, top - 2), name)
+                dxf.text((bx + inch(1), top - inch(2)), name)
         for name, segments in self.diagonal_segments(cl, both).items():
             for p0, p1 in segments:
                 dxf.add_grid_polyline([p0, p1])
-                dxf.text((p1[0] + 1, p1[1] + 1), name)
+                dxf.text((p1[0] + inch(1), p1[1] + inch(1)), name)
 
     def plot_body_lines(
         self,
@@ -1765,7 +1765,7 @@ class Model:
                 if labels:
                     # the highest point; the polylines run from the top down
                     x, y = max(poly, key=lambda pt: pt[1])
-                    dxf.text((x, y + 1), station, align="center")
+                    dxf.text((x, y + self.inches(1)), station, align="center")
         if sheer:
             for poly in self.body_sheer_polylines(lines):
                 dxf.add_red_polyline(poly)
@@ -1826,7 +1826,7 @@ class Model:
         return [p for polys in lines.values() for p in polys if p]
 
     def body_plan_origin_x(
-        self, lines: dict, placement: str, gap: float = 24.0, widest: str = None
+        self, lines: dict, placement: str, gap: float = None, widest: str = None
     ):
         """x position of the body plan centerline for the given placement.
 
@@ -1834,6 +1834,8 @@ class Model:
         (``{station: [polyline, ...]}``), ``widest`` is the station with the
         greatest breadth.
         """
+        if gap is None:
+            gap = self.inches(24.0)
         positions = self.station_positions()
         if placement == "max_breadth":
             return positions[widest] if widest is not None else 0.0
@@ -1862,7 +1864,7 @@ class Model:
         ]
 
     def diagonal_extension(self):
-        """(virtual) How far (inches, along the line) the diagonals are drawn
+        """(virtual) How far (along the line) the diagonals are drawn
         beyond the farthest hull point of the table. The default ``None``
         draws them up to their second point ``(x1, y1)``."""
         return None
@@ -1927,7 +1929,9 @@ class Model:
         for name, poly in self.loft_diagonal_plan_lines().items():
             dxf.add_red_polyline(poly)
             if labels:
-                dxf.text((poly[0][0] + 1, poly[0][1] - 3), name)
+                dxf.text(
+                    (poly[0][0] + self.inches(1), poly[0][1] - self.inches(3)), name
+                )
 
     def diagonal_body_points(self) -> list:
         """The diagonals as points of a body line: a ``DiagonalPoint`` for
@@ -1942,7 +1946,7 @@ class Model:
 
     def second_offset_at(self, station_id: str, line_id: str):
         """The second value of a cell ``offset1 and offset2`` of the row
-        ``line_id`` at ``station_id`` in inches (breadth, no sign and no
+        ``line_id`` at ``station_id`` in the unit of the model (breadth, no sign and no
         ``base_offset``), or ``None`` if the cell is empty or has one value."""
         if station_id not in self._too.columns:
             raise KeyError("unknown station: %r" % (station_id,))
@@ -1952,11 +1956,11 @@ class Model:
         values = MULTI_VALUE_SEPARATOR.split(offset.strip())
         if len(values) < 2:
             return None
-        return offset_to_inches(values[1], self._unit)
+        return offset_to_length(values[1], self._unit)
 
     def ghost_line(self):
         """(virtual) The "ghost line": ``(row, height)`` or ``None`` (default,
-        no ghost line). It is at ``height`` inches above the base line, like a
+        no ghost line). It is at ``height`` above the base line, like a
         waterline, from the first to the last station that has a second value
         in the cells ``offset1 and offset2`` of the table row ``row``. It is
         drawn in the profile view (``loft_ghost_profile_line``) and in the body
@@ -2029,14 +2033,14 @@ class Model:
             raise ValueError(
                 "no offset for line %r at station %r" % (line_id, station_id)
             )
-        value = self.offset_to_inches(offset)
+        value = self.offset_to_length(offset)
         if not vertical:
             # base_offset() positions lines on the drawing sheet (vertical only)
             return value
         return self.offset_sign(station_id, line_id) * value + self.base_offset(line_id)
 
     def breadth_at(self, station_id: str, line_id: str) -> float:
-        """returns the half-breadth (inches) at the given station_id at the given line_id
+        """returns the half-breadth (unit of the model) at the given station_id at the given line_id
 
         E.g. ("5", "sheer")
         """
@@ -2045,7 +2049,7 @@ class Model:
         )
 
     def height_at(self, station_id: str, line_id: str) -> float:
-        """returns the height (inches) at the given station_id at the given line_id
+        """returns the height (unit of the model) at the given station_id at the given line_id
 
         E.g. ("5", "WL 2")"""
         return self._offset_at(
@@ -2066,9 +2070,11 @@ class DXF:
     labels of the extra points, see ``EXTRA_POINT_SECTIONS``).
 
     ``unit`` - the unit of the coordinates in the file (``OUTPUT_UNITS``,
-    default ``"inch"``). The coordinates given to the methods are in inches;
-    they are scaled to ``unit`` (and so are the text heights) and the unit is
-    stored in the file (``$INSUNITS``).
+    default ``"inch"``) and ``source_unit`` - the unit of the coordinates given
+    to the methods (default ``"inch"``). They are scaled from ``source_unit``
+    to ``unit`` (and so are the text heights); the unit is stored in the file
+    (``$INSUNITS``) and ``$MEASUREMENT`` is set from it (0, English, for
+    ``inch`` and ``ft``; 1, metric, for the others).
 
     ACI colors
     1: Red
@@ -2080,15 +2086,19 @@ class DXF:
     7: White or black
     """
 
-    def __init__(self, output_dxf: str, unit: str = "inch"):
-        if unit not in OUTPUT_UNITS:
-            raise ValueError(
-                "unknown output unit %r, expected one of %s" % (unit, OUTPUT_UNITS)
-            )
+    def __init__(self, output_dxf: str, unit: str = "inch", source_unit: str = "inch"):
+        for u in (unit, source_unit):
+            if u not in OUTPUT_UNITS:
+                raise ValueError(
+                    "unknown unit %r, expected one of %s" % (u, OUTPUT_UNITS)
+                )
         self._output_dxf = output_dxf
         self._unit = unit
-        self._scale = 1.0 / TableOfOffsets.UNITS[unit]  # inches -> unit
+        self._source_unit = source_unit
+        # source unit -> unit
+        self._scale = TableOfOffsets.UNITS[source_unit] / TableOfOffsets.UNITS[unit]
         self._doc = ezdxf.new("R2010")
+        self._doc.header["$MEASUREMENT"] = 0 if unit in ("inch", "ft") else 1
         self._doc.units = {
             "inch": ezdxf.units.IN,
             "ft": ezdxf.units.FT,
@@ -2120,7 +2130,7 @@ class DXF:
         return True
 
     def _scaled(self, poly: list) -> list:
-        """The points (in inches) in the unit of the file"""
+        """The points (in the source unit) in the unit of the file"""
         return [(x * self._scale, y * self._scale) for x, y in poly]
 
     def add_polyline(self, poly: list):
@@ -2132,7 +2142,7 @@ class DXF:
         self._msp.add_polyline2d(self._scaled(poly), dxfattribs={"layer": "red"})
 
     def add_circle(self, center: tuple, radius: float, layer: str = "red"):
-        """Add a circle (centre and radius in inches) to ``layer`` (default
+        """Add a circle (centre and radius in the source unit) to ``layer`` (default
         ``red``)."""
         self._msp.add_circle(
             (center[0] * self._scale, center[1] * self._scale),
@@ -2160,12 +2170,13 @@ class DXF:
         xy: tuple,
         txt: str,
         align: str = "left",
-        height: float = 1.0,
+        height: float = None,
         layer: str = "text",
     ):
         """Add text to the ``text`` layer (or ``layer``)
 
-        height - the height of the text in inches.
+        height - the height of the text in the source unit; the default is
+        one inch.
 
         align - ``"left"`` (``xy`` is the bottom left corner of the text),
         ``"center"`` (the middle of the bottom of the text) or ``"right"`` (the
@@ -2178,6 +2189,8 @@ class DXF:
             dxfattribs={"style": "LiberationSerif"}
         ).set_placement((2, 6), align=TextEntityAlignment.LEFT)
         """
+        if height is None:
+            height = 1.0 / TableOfOffsets.UNITS[self._source_unit]
         alignment = {
             "left": ezdxf.enums.TextEntityAlignment.LEFT,
             "center": ezdxf.enums.TextEntityAlignment.BOTTOM_CENTER,

@@ -76,7 +76,7 @@ class Test_StationNames(unittest.TestCase):
     def assertMm(self, expected_mm, actual_inches):
         self.assertEqual(expected_mm.keys(), actual_inches.keys())
         for k, v in expected_mm.items():
-            self.assertAlmostEqual(v / 25.4, actual_inches[k], msg=k)
+            self.assertAlmostEqual(v, actual_inches[k], msg=k)
 
     def test_positions(self):
         model = self.model(
@@ -84,12 +84,12 @@ class Test_StationNames(unittest.TestCase):
             "[stations.positions]\nFP = 3000\n'1A' = 2500.5\n"
             "'1' = 2000\n'2' = 1000\nT = 0\n"
         )
-        # the lengths of the file are in millimetres, the model has inches
+        # the lengths of the file are in millimetres, the model has millimetres too
         self.assertMm(
             {"FP": 3000.0, "1A": 2500.5, "1": 2000.0, "2": 1000.0, "T": 0.0},
             model.station_positions(),
         )
-        self.assertAlmostEqual(1240 / 25.4, model.breadth_at("1A", "Sheer"))
+        self.assertAlmostEqual(1240, model.breadth_at("1A", "Sheer"))
 
     def test_positions_and_spacing(self):
         """the stations not in positions: by their place in the list"""
@@ -114,17 +114,22 @@ class Test_StationNames(unittest.TestCase):
         )
 
     def test_default_layout(self):
-        """no meta data: the n-th station is at n * 12 inches, whatever the
-        names"""
+        """no meta data: the n-th station is at n * 12 inches (a foot) for a
+        ftin table, whatever the names; there is no default for the others"""
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "t.csv")
             with open(path, "w") as f:
-                f.write(self.CSV)
-            model = table_of_offsets.Model(path, unit="mm")
+                f.write(self.CSV.replace("1350", "1-1-0"))
+            model = table_of_offsets.Model(path, unit="ftin")
             self.assertEqual(
                 {"FP": 0, "1A": 12, "1": 24, "2": 36, "T": 48},
                 model.station_positions(),
             )
+            with open(path, "w") as f:
+                f.write(self.CSV)
+            model = table_of_offsets.Model(path, unit="mm")
+            with self.assertRaises(ValueError):
+                model.station_positions()
 
     def test_errors(self):
         # a name without a position (no spacing)
@@ -183,7 +188,7 @@ class Test_ModelMeta(unittest.TestCase):
 
     def test_no_meta(self):
         """meta=False: no file; the defaults of the base class"""
-        model = table_of_offsets.Model(CSV, meta=False)
+        model = table_of_offsets.Model(CSV, unit="ftin", meta=False)
         self.assertIsNone(model.bow_station())
         self.assertIsNone(model.ghost_line())
         self.assertEqual({}, model.diagonals_positions())
@@ -205,9 +210,12 @@ class Test_ModelMeta(unittest.TestCase):
             with open(os.path.join(tmp, "t.grid"), "w") as f:
                 f.write("[table]\nunit = 'mm'\n[stations]\nspacing = 5\n")
             model = table_of_offsets.Model(csv)
-            self.assertAlmostEqual(5 / 25.4, model.station_positions()["B"])
+            self.assertAlmostEqual(5, model.station_positions()["B"])
             self.assertEqual("mm", model.offsets_unit())
-            other = table_of_offsets.Model(csv, meta=False)
+            # the unit is never guessed
+            with self.assertRaises(ValueError):
+                table_of_offsets.Model(csv, meta=False)
+            other = table_of_offsets.Model(csv, unit="ftin", meta=False)
             self.assertEqual("ftin", other.offsets_unit())
 
     def test_explicit_path_and_missing_file(self):
@@ -221,7 +229,7 @@ if __name__ == "__main__":
 
 
 class Test_MetaLengthsInTableUnit(unittest.TestCase):
-    def test_mm_lengths_are_converted_to_inches(self):
+    def test_lengths_are_in_the_unit_of_the_table(self):
         with tempfile.TemporaryDirectory() as d:
             csv = os.path.join(d, "t.csv")
             with open(csv, "w") as f:
@@ -230,12 +238,13 @@ class Test_MetaLengthsInTableUnit(unittest.TestCase):
                 f.write(
                     '[table]\nunit = "mm"\n[stations]\nspacing = 254.0\n'
                     "[buttocks]\nB1 = 508.0\n"
-                    '[waterlines]\nWL = { height = 25.4 }\n'
+                    "[waterlines]\nWL = { height = 25.4 }\n"
                 )
             m = table_of_offsets.Model(csv)
-            self.assertAlmostEqual(m.station_positions()["2"], 10.0)
-            self.assertAlmostEqual(m.buttocks_positions()["B1"], 20.0)
-            self.assertAlmostEqual(m.waterlines_positions()["WL"], 1.0)
+            # not converted
+            self.assertAlmostEqual(m.station_positions()["2"], 254.0)
+            self.assertAlmostEqual(m.buttocks_positions()["B1"], 508.0)
+            self.assertAlmostEqual(m.waterlines_positions()["WL"], 25.4)
 
 
 class Test_Siding(unittest.TestCase):
@@ -245,13 +254,15 @@ class Test_Siding(unittest.TestCase):
         with open(csv, "w") as f:
             f.write("#,1\nHeight Sheer,100\n")
         with open(os.path.join(d, "t.grid"), "w") as f:
-            f.write(text)
+            f.write(text if "unit" in text else "[table]\nunit = 'ftin'\n" + text)
         return table_of_offsets.Model(csv)
 
     def test_siding_in_table_unit(self):
-        m = self.model('[table]\nunit = "mm"\n[keel]\nsiding = 50.8\n[rabbet]\nsiding = 25.4\n')
-        self.assertAlmostEqual(2.0, m.siding("keel"))
-        self.assertAlmostEqual(1.0, m.siding("rabbet"))
+        m = self.model(
+            '[table]\nunit = "mm"\n[keel]\nsiding = 50.8\n[rabbet]\nsiding = 25.4\n'
+        )
+        self.assertAlmostEqual(50.8, m.siding("keel"))
+        self.assertAlmostEqual(25.4, m.siding("rabbet"))
         self.assertIsNone(m.siding("stem"))
         self.assertEqual(7.0, m.siding("stem", 7.0))
 
@@ -272,7 +283,7 @@ class Test_Keel(unittest.TestCase):
         with open(csv, "w") as f:
             f.write("#,A,B,C\nHeight Sheer,1,2,3\n")
         with open(os.path.join(d, "t.grid"), "w") as f:
-            f.write(text)
+            f.write(text if "unit" in text else "[table]\nunit = 'ftin'\n" + text)
         return table_of_offsets.Model(csv)
 
     def test_keel_line(self):
@@ -282,9 +293,9 @@ class Test_Keel(unittest.TestCase):
             'to = { station = "C", height = 0 }\n'
         )
         (x0, y0), (x1, y1) = m.keel_line()
-        self.assertAlmostEqual(10.0, x0)
-        self.assertAlmostEqual(1.0, y0)
-        self.assertAlmostEqual(20.0, x1)
+        self.assertAlmostEqual(254.0, x0)
+        self.assertAlmostEqual(25.4, y0)
+        self.assertAlmostEqual(508.0, x1)
         self.assertEqual(0, y1)
 
     def test_no_keel(self):
@@ -309,10 +320,7 @@ class Test_KeelPoint(unittest.TestCase):
         d = tempfile.mkdtemp()
         csv = os.path.join(d, "t.csv")
         with open(csv, "w") as f:
-            f.write(
-                "#,A,B,C\nHeight Sheer,100,100,100\n"
-                "Breadth Sheer,300,300,300\n"
-            )
+            f.write("#,A,B,C\nHeight Sheer,100,100,100\n" "Breadth Sheer,300,300,300\n")
         with open(os.path.join(d, "t.grid"), "w") as f:
             f.write(
                 '[table]\nunit = "mm"\n[stations]\nspacing = 100.0\n'
@@ -320,7 +328,7 @@ class Test_KeelPoint(unittest.TestCase):
                 'to = { station = "C", height = 10.0 }\nsiding = 40.0\n'
             )
         m = table_of_offsets.Model(csv)
-        mm = 1 / 25.4
+        mm = 1.0  # the model works in mm
         self.assertIsNone(m.keel_point_at("A"))
         x, y = m.keel_point_at("C")
         self.assertAlmostEqual(20 * mm, x)
@@ -341,7 +349,7 @@ class Test_KeelPoint(unittest.TestCase):
 
 
 class Test_KeelAndRabbetLines(unittest.TestCase):
-    MM = 1 / 25.4
+    MM = 1.0  # the model works in mm
 
     def model(self, grid):
         d = tempfile.mkdtemp()
@@ -383,10 +391,13 @@ class Test_KeelAndRabbetLines(unittest.TestCase):
         lines = m.loft_body_lines(
             [("Breadth Sheer", "Height Sheer")], "raw", sides="half"
         )
-        self.assertIn((30, 30), [(round(x / self.MM), round(y / self.MM)) for x, y in lines["C"][0]])
+        self.assertIn(
+            (30, 30),
+            [(round(x / self.MM), round(y / self.MM)) for x, y in lines["C"][0]],
+        )
 
     def test_nothing_in_the_file(self):
-        m = self.model("[table]\nunit = 'mm'\n")
+        m = self.model("[table]\nunit = 'mm'\n[stations]\nspacing = 10\n")
         self.assertIsNone(m.keel_profile_line())
         self.assertIsNone(m.rabbet_profile_line())
         self.assertIsNone(m.keel_plan_line())
@@ -461,7 +472,7 @@ class Test_KeelAndRabbetLines(unittest.TestCase):
         )
         # the table of the rabbet runs to the left: the line is descending
         m = self.model(
-            grid.replace('spacing = 100.0', "origin = 200.0\nspacing = -100.0")
+            grid.replace("spacing = 100.0", "origin = 200.0\nspacing = -100.0")
         )
         xs = [x for x, _ in m.rabbet_profile_line()]
         self.assertEqual(sorted(xs, reverse=True), xs)
@@ -471,7 +482,7 @@ class Test_KeelAndRabbetLines(unittest.TestCase):
             '[rabbet]\nheight_row = "Height RL"\nextra_points = 3\n',
             '[rabbet]\nheight_row = "Height RL"\nextra_points = [{ station = "A" }]\n',
             '[rabbet]\nheight_row = "Height RL"\n'
-            'extra_points = [{ station = 1, dx = 0, height = 0 }]\n',
+            "extra_points = [{ station = 1, dx = 0, height = 0 }]\n",
             '[rabbet]\nextra_points = [{ station = "A", dx = 0, height = 0 }]\n',
         ):
             with self.assertRaises(ValueError, msg=text):
@@ -582,7 +593,7 @@ class Test_KeelAndRabbetLines(unittest.TestCase):
 class Test_RabbetExtraPointsInViews(unittest.TestCase):
     """the extra points of the rabbet line in the plan and body views"""
 
-    MM = 1 / 25.4
+    MM = 1.0  # the model works in mm
 
     def model(self, sides_unused=None):
         d = tempfile.mkdtemp()
@@ -632,9 +643,13 @@ class Test_RabbetExtraPointsInViews(unittest.TestCase):
             [("Breadth Sheer", "Height Sheer")], "raw", sides="half"
         )
         self.assertEqual(2, len(lines.extra_points))
-        self.assertEqual([(4, 60), (3, 70)], [
-            (round(x / self.MM), round(y / self.MM)) for x, y, _ in lines.extra_points
-        ])
+        self.assertEqual(
+            [(4, 60), (3, 70)],
+            [
+                (round(x / self.MM), round(y / self.MM))
+                for x, y, _ in lines.extra_points
+            ],
+        )
 
     def test_plot_marks_the_points(self):
         class Dxf:
@@ -671,7 +686,7 @@ class Test_RabbetExtraPointsInViews(unittest.TestCase):
 
 
 class Test_ChineLine(unittest.TestCase):
-    MM = 1 / 25.4
+    MM = 1.0  # the model works in mm
 
     def model(self, chine=True):
         d = tempfile.mkdtemp()
@@ -683,9 +698,13 @@ class Test_ChineLine(unittest.TestCase):
                 "Height Chine,,40,45,\nBreadth Chine,,200,250,\n"
             )
         with open(os.path.join(d, "t.grid"), "w") as f:
-            f.write('[table]\nunit = "mm"\nbow_station = "D"\n[stations]\nspacing = 100.0\n')
+            f.write(
+                '[table]\nunit = "mm"\nbow_station = "D"\n[stations]\nspacing = 100.0\n'
+            )
             if chine:
-                f.write('[chine]\nheight_row = "Height Chine"\nbreadth_row = "Breadth Chine"\n')
+                f.write(
+                    '[chine]\nheight_row = "Height Chine"\nbreadth_row = "Breadth Chine"\n'
+                )
         return table_of_offsets.Model(csv)
 
     def test_chine_body_point(self):
@@ -699,17 +718,23 @@ class Test_ChineLine(unittest.TestCase):
         body = [("Breadth Sheer", "Height Sheer")]
         lines = m.loft_body_lines(body, "raw", sides="half")
         # B and C have the chine; it is a point of their body lines
-        chine = [[(round(x / self.MM), round(y / self.MM)) for x, y in p] for p in lines.chine]
+        chine = [
+            [(round(x / self.MM), round(y / self.MM)) for x, y in p]
+            for p in lines.chine
+        ]
         self.assertEqual([[(200, 40), (250, 45)]], chine)
         for st, pt in (("B", (200, 40)), ("C", (250, 45))):
             self.assertIn(
                 pt,
                 [(round(x / self.MM), round(y / self.MM)) for x, y in lines[st][0]],
             )
-        self.assertEqual(chine, [
-            [(round(x / self.MM), round(y / self.MM)) for x, y in p]
-            for p in m.body_chine_polylines(lines)
-        ])
+        self.assertEqual(
+            chine,
+            [
+                [(round(x / self.MM), round(y / self.MM)) for x, y in p]
+                for p in m.body_chine_polylines(lines)
+            ],
+        )
         # no chine: no line, nothing added
         self.assertEqual([], list(self.model(False).loft_body_lines(body, "raw").chine))
 
@@ -725,7 +750,9 @@ class Test_ChineLine(unittest.TestCase):
                 pass
 
         m = self.model()
-        lines = m.loft_body_lines([("Breadth Sheer", "Height Sheer")], "raw", sides="half")
+        lines = m.loft_body_lines(
+            [("Breadth Sheer", "Height Sheer")], "raw", sides="half"
+        )
         dxf = Dxf()
         m.plot_body_lines(dxf, lines, chine=False)
         n = len(dxf.lines)
@@ -753,7 +780,7 @@ class Test_ExtraPointsOfTheKeel(unittest.TestCase):
     """extra_points is not rabbet specific: here the keel line is only
     extra points"""
 
-    MM = 1 / 25.4
+    MM = 1.0  # the model works in mm
 
     def model(self, keel):
         d = tempfile.mkdtemp()
@@ -805,9 +832,7 @@ class Test_ExtraPointsOfTheKeel(unittest.TestCase):
             'to = { station = "D", height = 0 }\n'
             'extra_points = [{ station = "B", dx = 10.0, height = 7 }]\n'
         )
-        self.assertEqual(
-            [(0, 0), (110, 7), (300, 0)], self.mm(m.keel_profile_line())
-        )
+        self.assertEqual([(0, 0), (110, 7), (300, 0)], self.mm(m.keel_profile_line()))
 
     def test_in_the_body_plan_and_marked(self):
         m = self.model(self.KEEL)
@@ -815,14 +840,14 @@ class Test_ExtraPointsOfTheKeel(unittest.TestCase):
             [("Breadth Sheer", "Height Sheer")], "raw", sides="half"
         )
         # K1, the keel points of B and C, K2 (B and C have the keel point)
-        keel = [[(round(x / self.MM), round(y / self.MM)) for x, y in p] for p in lines.keel]
+        keel = [
+            [(round(x / self.MM), round(y / self.MM)) for x, y in p] for p in lines.keel
+        ]
         self.assertEqual(1, len(keel))
         self.assertEqual((20, 10), keel[0][0])
         self.assertEqual((5, 30), keel[0][-1])
         self.assertEqual(4, len(keel[0]))  # K1, B, C, K2
-        self.assertEqual(
-            ["K1", "K2"], [label for _, _, label in lines.extra_points]
-        )
+        self.assertEqual(["K1", "K2"], [label for _, _, label in lines.extra_points])
 
         class Dxf:
             def __init__(self):
@@ -899,7 +924,7 @@ class Test_ExtraPointEdge(unittest.TestCase):
         with open(csv, "w") as f:
             f.write("#,A,B\nHeight Sheer,1,1\n")
         with open(os.path.join(d, "t.grid"), "w") as f:
-            f.write("[keel]\nextra_points = [%s]\n" % points)
+            f.write("[table]\nunit = 'ftin'\n[keel]\nextra_points = [%s]\n" % points)
         return table_of_offsets.Model(csv)
 
     def test_default_is_off(self):
@@ -922,7 +947,7 @@ class Test_EdgesInTheOrthogonalViews(unittest.TestCase):
     """an extra point with edge = true is seen in the profile view; its edge
     is seen in the plan view and in the body plan"""
 
-    MM = 1 / 25.4
+    MM = 1.0  # the model works in mm
 
     def model(self):
         d = tempfile.mkdtemp()
@@ -955,11 +980,15 @@ class Test_EdgesInTheOrthogonalViews(unittest.TestCase):
 
     def test_body_plan(self):
         m = self.model()
-        half = m.loft_body_lines([("Breadth Sheer", "Height Sheer")], "raw", sides="half")
+        half = m.loft_body_lines(
+            [("Breadth Sheer", "Height Sheer")], "raw", sides="half"
+        )
         self.assertEqual(
             [[(0, 10), (20, 10)], [(0, 50), (20, 50)]], self.mm(half.edges)
         )
-        both = m.loft_body_lines([("Breadth Sheer", "Height Sheer")], "raw", sides="both")
+        both = m.loft_body_lines(
+            [("Breadth Sheer", "Height Sheer")], "raw", sides="both"
+        )
         self.assertEqual(
             [[(-20, 10), (20, 10)], [(-20, 50), (20, 50)]], self.mm(both.edges)
         )

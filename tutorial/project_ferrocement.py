@@ -1,7 +1,7 @@
 """A ferrocement hull: model of sample_data/a_ferrocement_hull/offset_table.csv
 
 Source: https://www.fao.org/4/v9468e/v9468e05.htm (see the images next to the
-table). The table is in millimetres (``unit="mm"``); the model works in inches.
+table). The table is in millimetres (``unit="mm"``); the model works in the unit of the table.
 
 Table layout: stations ``T`` (transom) and ``1`` .. ``12``; rows named
 ``Height ...`` are heights above the baseline (Buttock I-III, Keel, Knuckle,
@@ -35,8 +35,6 @@ from context import table_of_offsets
 
 import os
 
-MM = 1.0 / 25.4  # inches in a millimetre
-
 DRAUGHT_MM = 1800.0  # the height of the design waterline above the baseline
 WATERLINE_DISTANCE_MM = 250.0  # between the waterlines
 DWL_NUMBER = 5  # the design waterline is "WL 5" of the table
@@ -54,11 +52,11 @@ class ProjectFerrocement(table_of_offsets.Model):
         )
         self.set_bow_station("12")
         # the plan view is drawn below the profile view
-        self._y_plan = -80.0
+        self._y_plan = -self.inches(80.0)  # 80 inches, in mm
 
     def station_positions(self):
         """The transom T is at x = 0, the stations 1..12 are 1 m apart."""
-        return {c: (0 if c == "T" else int(c)) * 1000 * MM for c in self._stations()}
+        return {c: (0 if c == "T" else int(c)) * 1000 for c in self._stations()}
 
     def _stations(self):
         return [c for c in self._too.columns if c != "#"]
@@ -70,15 +68,15 @@ class ProjectFerrocement(table_of_offsets.Model):
         return 0
 
     def buttocks_positions(self):
-        return {"B I": 500 * MM, "B II": 1000 * MM, "B III": 1500 * MM}
+        return {"B I": 500, "B II": 1000, "B III": 1500}
 
     def waterline_height(self, n: int) -> float:
-        """Height of the waterline "WL n" above the baseline, in inches.
+        """Height of the waterline "WL n" above the baseline, in the unit of the table.
 
         Not in the table: the design waterline (WL 5) is at the draught and
         the waterlines are 250 mm apart.
         """
-        return (DRAUGHT_MM + (n - DWL_NUMBER) * WATERLINE_DISTANCE_MM) * MM
+        return DRAUGHT_MM + (n - DWL_NUMBER) * WATERLINE_DISTANCE_MM
 
     def waterline_row(self, name: str) -> str:
         """the half-breadths of "WL n" are in the row "Breadth WL n"; DWL is WL 5"""
@@ -96,13 +94,13 @@ class ProjectFerrocement(table_of_offsets.Model):
         return [0.0, self._y_plan]
 
     def drawing_area_vertical_borders(self):
-        return (self._y_plan - 20, 130.0)
+        return (self._y_plan - self.inches(20.0), self.inches(130.0))
 
     def body_points(self):
         """The (breadth, height) points of a body line, without the waterlines
         (``loft_body_lines`` adds them): a string is a table row, a number is
-        inches."""
-        # (breadth, height): a string is a table row, a number is inches
+        the unit of the table (mm)."""
+        # (breadth, height): a string is a table row, a number is in the unit of the table
         body_points = [
             ("Breadth Sheer", "Height Sheer"),
             ("Breadth Deck", "Height Deck"),
@@ -127,7 +125,7 @@ class ProjectFerrocement(table_of_offsets.Model):
     ):
         """Return {station: [polyline, ...]}: the body plan lines.
 
-        Points are (half-breadth, height above the baseline) in inches: the
+        Points are (half-breadth, height above the baseline) in the unit of the table: the
         sheer, the deck, the knuckle, the keel, the three buttocks and the
         waterlines WL 1 - WL 8. With the assumed waterline heights the points
         do not agree with the buttocks, so the sections zigzag, see the TODO in

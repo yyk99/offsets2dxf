@@ -1,7 +1,7 @@
 """The 28' Cutter Njord: model of sample_data_too/28ft_cutter/offset_table.csv
 
 The table is from a picture (a private submodule; run ``git submodule update
---init``), in feet-inches-eighths; the model works in inches. The grid (the
+--init``), in feet-inches-eighths; the model works in inches (``ftin`` is a format). The grid (the
 stations placed right to left, the bow on the right; the rabbet rows; the
 sheet layout) is in the meta data file offset_table.grid next to the CSV.
 

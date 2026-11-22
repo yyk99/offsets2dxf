@@ -71,7 +71,7 @@ class ProjectTabbyCatMeta(table_of_offsets.Model):
     ):
         """Return {station: [polyline, ...]}: the body plan lines.
 
-        Points are (half-breadth, height above the baseline) in inches: the
+        Points are (half-breadth, height above the baseline) in the unit of the table: the
         sheer, the rabbet, the keel, the four buttocks and the waterlines
         WL 1 - WL 8.
         """

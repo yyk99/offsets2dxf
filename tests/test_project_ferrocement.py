@@ -12,7 +12,7 @@ import ezdxf
 source_directory = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(source_directory, "tutorial"))
 
-MM = 1.0 / 25.4
+MM = 1.0  # the model works in mm
 
 
 class Test_ProjectFerrocement(unittest.TestCase):
@@ -35,7 +35,7 @@ class Test_ProjectFerrocement(unittest.TestCase):
         row = too[too["#"] == "Breadth WL 5"].iloc[0]
         self.assertEqual("1290", row["2"])
 
-    def test_inches(self):
+    def test_values_in_mm(self):
         self.assertAlmostEqual(2644 * MM, self.project.height_at("9", "Height Sheer"))
         self.assertAlmostEqual(1290 * MM, self.project.breadth_at("2", "Breadth WL 5"))
         with self.assertRaises(ValueError):
@@ -131,7 +131,7 @@ class Test_ProjectFerrocement(unittest.TestCase):
                 )
                 if pts[0][1] == pts[1][1]
             )
-            # (the file is in millimetres, the model in inches)
+            # (the file and the model are in millimetres)
             expected = [0.0] + [
                 round(h / MM, 6) for h in self.project.waterlines_positions().values()
             ]

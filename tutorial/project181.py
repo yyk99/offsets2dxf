@@ -27,6 +27,7 @@ class Project181(table_of_offsets.Model):
             os.path.join(
                 os.path.dirname(__file__), "../sample_data_too/offset_table_181.csv"
             ),
+            unit="ftin",
             meta=False,  # the grid is in this file; see project181_meta.py
         )
         # fmt: off
