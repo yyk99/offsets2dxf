@@ -640,15 +640,18 @@ class Test_RabbetExtraPointsInViews(unittest.TestCase):
         class Dxf:
             def __init__(self):
                 self.circles, self.texts, self.lines = [], [], []
+                self.layers = []
 
             def add_red_polyline(self, line):
                 self.lines.append(line)
 
-            def add_red_circle(self, center, radius):
+            def add_circle(self, center, radius, layer="red"):
                 self.circles.append(center)
+                self.layers.append(layer)
 
-            def text(self, xy, txt, **kw):
+            def text(self, xy, txt, layer="text", **kw):
                 self.texts.append(txt)
+                self.layers.append(layer)
 
         m = self.model()
         dxf = Dxf()
@@ -656,6 +659,8 @@ class Test_RabbetExtraPointsInViews(unittest.TestCase):
         # two points in the profile and two in the plan view
         self.assertEqual(4, len(dxf.circles))
         self.assertEqual(["E1", "E1", "E2", "E2"], dxf.texts)
+        # the markers and the labels are in their own layer
+        self.assertEqual({table_of_offsets.EXTRA_POINT_LAYER}, set(dxf.layers))
         dxf = Dxf()
         m.plot_keel_and_rabbet(dxf, extra_points=False)
         self.assertEqual([], dxf.circles)
@@ -826,7 +831,7 @@ class Test_ExtraPointsOfTheKeel(unittest.TestCase):
             def add_red_polyline(self, line):
                 pass
 
-            def add_red_circle(self, center, radius):
+            def add_circle(self, center, radius, layer="red"):
                 pass
 
             def text(self, xy, txt, **kw):
@@ -855,3 +860,31 @@ class Test_ExtraPointsOfTheKeel(unittest.TestCase):
         m = self.model('[keel]\nextra_points = [{ station = "X", height = 1 }]\n')
         with self.assertRaises(ValueError):
             m.keel_points()
+
+
+class Test_ExtraPointsLayer(unittest.TestCase):
+    """the circles and the labels of the extra points are in their own layer
+    of the .dxf file"""
+
+    def test_dxf_layer(self):
+        import ezdxf
+
+        d = tempfile.mkdtemp()
+        out = os.path.join(d, "out.dxf")
+        with table_of_offsets.DXF(out) as dxf:
+            dxf.add_red_polyline([(0, 0), (1, 1)])
+            dxf.text((0, 0), "station")
+            dxf.add_circle((5, 5), 1.0, layer=table_of_offsets.EXTRA_POINT_LAYER)
+            dxf.text((6, 6), "E1", layer=table_of_offsets.EXTRA_POINT_LAYER)
+        doc = ezdxf.readfile(out)
+        self.assertIn(table_of_offsets.EXTRA_POINT_LAYER, doc.layers)
+        msp = doc.modelspace()
+        self.assertEqual(
+            [table_of_offsets.EXTRA_POINT_LAYER],
+            [e.dxf.layer for e in msp.query("CIRCLE")],
+        )
+        self.assertEqual(
+            {"station": "text", "E1": table_of_offsets.EXTRA_POINT_LAYER},
+            {e.dxf.text: e.dxf.layer for e in msp.query("TEXT")},
+        )
+        self.assertEqual(["red"], [e.dxf.layer for e in msp.query("POLYLINE")])

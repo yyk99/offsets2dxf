@@ -211,6 +211,8 @@ def inches_to_offset(value: float, unit: str = "ftin") -> str:
 # XY coordinates of the profile view and the half-breadth. The label prefix
 # of the markers of the points in the drawings is the value.
 EXTRA_POINT_SECTIONS = {"rabbet": "E", "keel": "K"}
+# the layer of the .dxf with the circles and the labels of the extra points
+EXTRA_POINT_LAYER = "extra_points"
 
 # the extensions of a meta data file ("meta" and "grid" are synonyms)
 META_EXTENSIONS = (".meta", ".grid")
@@ -916,9 +918,10 @@ class Model:
         return self._merge_by_x(line, extra) if extra else line
 
     def _plot_extra_point(self, dxf: object, xy: tuple, label: str):
-        """A marker (a circle) and the label of an extra point at ``xy``."""
-        dxf.add_red_circle(xy, 0.75)
-        dxf.text((xy[0] + 1, xy[1] + 1), label)
+        """A marker (a circle) and the label of an extra point at ``xy``, both
+        in the layer ``EXTRA_POINT_LAYER``."""
+        dxf.add_circle(xy, 0.75, layer=EXTRA_POINT_LAYER)
+        dxf.text((xy[0] + 1, xy[1] + 1), label, layer=EXTRA_POINT_LAYER)
 
     def plot_keel_and_rabbet(
         self,
@@ -1993,7 +1996,8 @@ class DXF:
             dxf.add_red_polyline([(0, 0), (10, 5)])
 
     The file is saved when the ``with`` block exits. Layers: ``grid``,
-    ``red`` (lofted lines), ``text``.
+    ``red`` (lofted lines), ``text``, ``extra_points`` (the markers and the
+    labels of the extra points, see ``EXTRA_POINT_SECTIONS``).
 
     ``unit`` - the unit of the coordinates in the file (``OUTPUT_UNITS``,
     default ``"inch"``). The coordinates given to the methods are in inches;
@@ -2030,6 +2034,7 @@ class DXF:
         self._doc.layers.add(name="grid", color=6)
         self._doc.layers.add(name="red", color=1)
         self._doc.layers.add(name="text", color=3)
+        self._doc.layers.add(name=EXTRA_POINT_LAYER, color=4)
 
     def __enter__(self):
         # print("Enter with:", self._output_dxf)
@@ -2060,12 +2065,13 @@ class DXF:
         """Add a 2D polyline to the ``red`` layer."""
         self._msp.add_polyline2d(self._scaled(poly), dxfattribs={"layer": "red"})
 
-    def add_red_circle(self, center: tuple, radius: float):
-        """Add a circle (centre and radius in inches) to the ``red`` layer."""
+    def add_circle(self, center: tuple, radius: float, layer: str = "red"):
+        """Add a circle (centre and radius in inches) to ``layer`` (default
+        ``red``)."""
         self._msp.add_circle(
             (center[0] * self._scale, center[1] * self._scale),
             radius * self._scale,
-            dxfattribs={"layer": "red"},
+            dxfattribs={"layer": layer},
         )
 
     def add_grid_polyline(self, poly: list):
@@ -2083,8 +2089,15 @@ class DXF:
             self._doc = None
             self._msp = None
 
-    def text(self, xy: tuple, txt: str, align: str = "left", height: float = 1.0):
-        """Add text to the ``text`` layer
+    def text(
+        self,
+        xy: tuple,
+        txt: str,
+        align: str = "left",
+        height: float = 1.0,
+        layer: str = "text",
+    ):
+        """Add text to the ``text`` layer (or ``layer``)
 
         height - the height of the text in inches.
 
@@ -2105,5 +2118,5 @@ class DXF:
             "right": ezdxf.enums.TextEntityAlignment.BOTTOM_RIGHT,
         }[align]
         self._msp.add_text(
-            txt, height=height * self._scale, dxfattribs={"layer": "text"}
+            txt, height=height * self._scale, dxfattribs={"layer": layer}
         ).set_placement((xy[0] * self._scale, xy[1] * self._scale), align=alignment)
