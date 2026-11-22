@@ -206,6 +206,12 @@ def inches_to_offset(value: float, unit: str = "ftin") -> str:
     return "%d-%d-%d%s" % (feet, inches, eighths, "+" if plus else "")
 
 
+# The elements (sections of the meta data file) that can have ``extra_points``:
+# geometry that is not in the table of offsets, a list of points given by the
+# XY coordinates of the profile view and the half-breadth. The label prefix
+# of the markers of the points in the drawings is the value.
+EXTRA_POINT_SECTIONS = {"rabbet": "E", "keel": "K"}
+
 # the extensions of a meta data file ("meta" and "grid" are synonyms)
 META_EXTENSIONS = (".meta", ".grid")
 
@@ -214,7 +220,7 @@ _META_KEYS = {
     "table": {"csv", "unit", "bow_station", "multi_value"},
     "stations": {"origin", "spacing", "positions"},
     "ghost_line": {"row", "height"},
-    "keel": {"from", "to", "siding"},
+    "keel": {"from", "to", "siding", "extra_points"},
     "rabbet": {"siding", "height_row", "breadth_row", "extra_points"},
     "chine": {"height_row", "breadth_row"},
     "sheet": {"y_origins", "vertical_borders"},
@@ -255,10 +261,11 @@ def _meta_lengths_to_inches(meta: dict, k: float) -> dict:
     for section in ("keel", "rabbet"):
         if "siding" in meta.get(section, {}):
             meta[section]["siding"] *= k
-    for p in meta.get("rabbet", {}).get("extra_points", []):
-        for key in ("dx", "height", "breadth"):
-            if key in p:
-                p[key] *= k
+    for section in EXTRA_POINT_SECTIONS:
+        for p in meta.get(section, {}).get("extra_points", []):
+            for key in ("dx", "height", "breadth"):
+                if key in p:
+                    p[key] *= k
     for d in meta.get("waterlines", {}).values():
         d["height"] *= k
     for d in meta.get("diagonals", {}).values():
@@ -352,7 +359,6 @@ def load_meta(path: str) -> dict:
             raise bad("[rabbet] %s must be the name of a table row" % key)
     if "breadth_row" in rabbet and "height_row" not in rabbet:
         raise bad("[rabbet] breadth_row needs height_row")
-    points = rabbet.get("extra_points", [])
 
     def good_point(p):
         """{ station, dx (optional), height | height_row,
@@ -371,13 +377,16 @@ def load_meta(path: str) -> dict:
             for k in set(p) - {"station"}
         )
 
-    if not isinstance(points, list) or not all(map(good_point, points)):
-        raise bad(
-            "[rabbet] extra_points must be a list of { station = \"..\", "
-            "dx = N (optional), height = N or height_row = \"..\", "
-            "breadth = N or breadth_row = \"..\" (optional) }"
-        )
-    if points and "height_row" not in rabbet:
+    for section in EXTRA_POINT_SECTIONS:
+        points = meta.get(section, {}).get("extra_points", [])
+        if not isinstance(points, list) or not all(map(good_point, points)):
+            raise bad(
+                '[%s] extra_points must be a list of { station = "..", '
+                "dx = N (optional), height = N or height_row = \"..\", "
+                'breadth = N or breadth_row = ".." (optional) }' % section
+            )
+    if meta.get("rabbet", {}).get("extra_points") and "height_row" not in rabbet:
+        # the points are merged into the line of the table
         raise bad("[rabbet] extra_points needs height_row")
     for section in ("waterlines", "diagonals"):
         for name, entry in meta.get(section, {}).items():
@@ -455,15 +464,14 @@ class BodyLines(dict):
     rabbet line and the keel line (see ``Model.body_sheer_polylines``,
     ``Model.body_rabbet_polylines`` and ``Model.body_keel_polylines``), ``chine``,
     the chine line (``Model.body_chine_polylines``), and ``extra_points``, the
-    extra points of the rabbet line."""
+    extra points of the elements."""
 
     sheer = ()
     rabbet = ()
     keel = ()
     chine = ()
-    # the extra points of the rabbet line, ``[(x, y, number), ...]`` in the
-    # body plan (one for every side they are drawn on), see
-    # ``Model.rabbet_extra_points``
+    # the extra points of the elements, ``[(x, y, label), ...]`` in the body
+    # plan (one for every side they are drawn on), see ``Model.extra_points``
     extra_points = ()
 
 
@@ -742,23 +750,36 @@ class Model:
             ends.append((positions[station], float(keel[end]["height"])))
         return tuple(ends)
 
-    def keel_point_at(self, station: str):
-        """The keel point of the body line of ``station``: ``(half siding,
-        height)`` in inches, the height is that of the keel line
-        (``keel_line``) at the x of the station; None if the file gives no
-        keel line or the station is beyond its ends. The half siding is half
-        of ``siding("keel")`` (0 if the file does not give it). The body line
-        of a station with a keel point goes down to it."""
+    def keel_points(self):
+        """The points ``[(x, height, breadth)]`` of the keel line in the
+        profile view (inches): the straight line of ``from`` and ``to`` of
+        ``[keel]`` (the half-breadth is half of its ``siding``, 0 if there is
+        none) merged by x with its ``extra_points``; without the line the
+        extra points, in the order of the file. [] if the file gives
+        neither."""
         line = self.keel_line()
+        extra = self.extra_points("keel")
         if line is None:
-            return None
-        (x0, y0), (x1, y1) = line
+            return extra
+        half = self.siding("keel", 0.0) / 2
+        base = [(x, y, half) for x, y in line]
+        descending = base[0][0] > base[1][0]
+        return sorted(base + extra, key=lambda pt: pt[0], reverse=descending)
+
+    def keel_point_at(self, station: str):
+        """The keel point of the body line of ``station``: ``(half-breadth,
+        height)`` in inches, interpolated along the keel line
+        (``keel_points``) at the x of the station; None if the file gives no
+        keel line or the station is beyond its ends. The body line of a
+        station with a keel point goes down to it."""
+        points = self.keel_points()
         x = self.station_positions()[station]
         eps = 1e-9
-        if not (min(x0, x1) - eps <= x <= max(x0, x1) + eps):
-            return None
-        t = 0.0 if x1 == x0 else (x - x0) / (x1 - x0)
-        return (self.siding("keel", 0.0) / 2, y0 + t * (y1 - y0))
+        for (x0, y0, b0), (x1, y1, b1) in zip(points, points[1:]):
+            if min(x0, x1) - eps <= x <= max(x0, x1) + eps:
+                t = 0.0 if x1 == x0 else (x - x0) / (x1 - x0)
+                return (b0 + t * (b1 - b0), y0 + t * (y1 - y0))
+        return None
 
     def plan_centerline_y(self):
         """(virtual) The y of the centerline of the plan view, where the
@@ -768,29 +789,32 @@ class Model:
         return origins[1] if len(origins) > 1 else None
 
     def keel_profile_line(self):
-        """The keel in the profile view: ``[(x0, y0), (x1, y1)]`` from the
-        ``[keel]`` line, or None if the file gives none."""
-        line = self.keel_line()
-        return None if line is None else list(line)
+        """The keel in the profile view: ``[(x, y), ...]`` (see
+        ``keel_points``), or None if the file gives none."""
+        points = self.keel_points()
+        return [(x, y) for x, y, _ in points] if points else None
 
-    def rabbet_extra_points(self):
-        """The extra points of the rabbet line from ``extra_points`` of
-        ``[rabbet]``: ``[(x, height, breadth)]`` in inches. A point is given
-        by the XY coordinates of the profile view (``dx`` right of a station,
-        default 0, and ``height`` above the datum); its Z, the half-breadth,
-        is ``breadth`` if the file gives it, else that of the rabbet at the
-        nearest x that has one (the row ``breadth_row`` of ``[rabbet]``, or
-        half of the rabbet siding). The height and the half-breadth can also
-        be those of table rows at the station: ``height_row``,
-        ``breadth_row`` of the point ("the same as the sheer point")."""
-        rabbet = self._meta.get("rabbet", {})
+    def extra_points(self, section: str):
+        """The extra points of the element ``section`` (one of
+        ``EXTRA_POINT_SECTIONS``) from ``extra_points`` of its section of the
+        meta data file: ``[(x, height, breadth)]`` in inches, in the order of
+        the file. Geometry that is not in the table of offsets (e.g. the
+        shape of a stem or a keel). A point is given by the XY coordinates of
+        the profile view (``dx`` right of a station, default 0, and
+        ``height`` above the datum); its Z, the half-breadth, is ``breadth``
+        if the file gives it, else that of the element at the nearest x that
+        has one (the row ``breadth_row`` of the section, or half of its
+        ``siding``). The height and the half-breadth can also be those of
+        table rows at the station: ``height_row``, ``breadth_row`` of the
+        point ("the same as the sheer point")."""
+        entry = self._meta.get(section, {})
         positions = self.station_positions()
-        table = self._rabbet_breadths()
+        table = self._section_breadths(section)
         points = []
-        for p in rabbet.get("extra_points", []):
+        for p in entry.get("extra_points", []):
             if p["station"] not in positions:
                 raise ValueError(
-                    "[rabbet] extra_points: unknown station %r" % (p["station"],)
+                    "[%s] extra_points: unknown station %r" % (section, p["station"])
                 )
             x = positions[p["station"]] + p.get("dx", 0.0)
             if "height_row" in p:
@@ -804,14 +828,18 @@ class Model:
             elif table:
                 breadth = min(table, key=lambda t: abs(t[0] - x))[1]
             else:
-                breadth = self.siding("rabbet", 0.0) / 2
+                breadth = self.siding(section, 0.0) / 2
             points.append((x, height, breadth))
         return points
 
-    def _rabbet_breadths(self):
-        """``[(x, half-breadth)]`` of the row ``breadth_row`` of ``[rabbet]``
+    def rabbet_extra_points(self):
+        """The extra points of the rabbet line, see ``extra_points``."""
+        return self.extra_points("rabbet")
+
+    def _section_breadths(self, section: str):
+        """``[(x, half-breadth)]`` of the row ``breadth_row`` of the section
         (no ``base_offset``), or [] if the file gives none."""
-        row = self._meta.get("rabbet", {}).get("breadth_row")
+        row = self._meta.get(section, {}).get("breadth_row")
         if row is None:
             return []
         return [
@@ -850,14 +878,19 @@ class Model:
         return [(x, y) for x, _ in profile]
 
     def keel_plan_line(self):
-        """The keel in the plan view (see ``_plan_line``), or None."""
-        return self._plan_line(self.keel_profile_line(), "keel")
+        """The keel in the plan view: its points (``keel_points``) at their
+        half-breadth off the plan centerline, or None."""
+        y0 = self._plan_shift("keel")
+        points = self.keel_points()
+        if y0 is None or not points:
+            return None
+        return [(x, y0 + b) for x, _, b in points]
 
-    def _rabbet_plan_shift(self):
-        """The y of the plan view that the half-breadths of the rabbet are
-        added to: ``base_offset`` of the row ``breadth_row`` of ``[rabbet]``,
-        else the plan centerline; None if there is none."""
-        row = self._meta.get("rabbet", {}).get("breadth_row")
+    def _plan_shift(self, section: str):
+        """The y of the plan view that the half-breadths of the element
+        ``section`` are added to: ``base_offset`` of the row ``breadth_row``
+        of its section, else the plan centerline; None if there is none."""
+        row = self._meta.get(section, {}).get("breadth_row")
         return self.base_offset(row) if row is not None else self.plan_centerline_y()
 
     def rabbet_plan_line(self):
@@ -870,7 +903,7 @@ class Model:
         rabbet = self._meta.get("rabbet", {})
         if "height_row" not in rabbet:
             return None
-        shift = self._rabbet_plan_shift()
+        shift = self._plan_shift("rabbet")
         if shift is None:
             return None
         if "breadth_row" in rabbet:
@@ -882,11 +915,10 @@ class Model:
         extra = [(x, shift + b) for x, _, b in self.rabbet_extra_points()]
         return self._merge_by_x(line, extra) if extra else line
 
-    def _plot_extra_point(self, dxf: object, xy: tuple, number: int):
-        """A marker (a circle) and the label ``E<number>`` of an extra point
-        at ``xy``."""
+    def _plot_extra_point(self, dxf: object, xy: tuple, label: str):
+        """A marker (a circle) and the label of an extra point at ``xy``."""
         dxf.add_red_circle(xy, 0.75)
-        dxf.text((xy[0] + 1, xy[1] + 1), "E%d" % number)
+        dxf.text((xy[0] + 1, xy[1] + 1), label)
 
     def plot_keel_and_rabbet(
         self,
@@ -898,8 +930,9 @@ class Model:
         """Draw the keel and the rabbet lines that the meta data file gives
         into ``dxf``: in the profile view (``profile``) and in the plan view
         (``plan``). Lines the file does not give are not drawn. With
-        ``extra_points`` the extra points of the rabbet line are marked
-        (``E1``, ``E2``, ...) in the views drawn."""
+        ``extra_points`` the extra points of the elements (``E1``, ``E2``, ...
+        for the rabbet, ``K1``, ... for the keel, see
+        ``EXTRA_POINT_SECTIONS``) are marked in the views drawn."""
         lines = []
         if profile:
             lines += [self.keel_profile_line(), self.rabbet_profile_line()]
@@ -909,12 +942,17 @@ class Model:
             if line:
                 dxf.add_red_polyline(line)
         if extra_points:
-            shift = self._rabbet_plan_shift()
-            for n, (x, height, breadth) in enumerate(self.rabbet_extra_points(), 1):
-                if profile:
-                    self._plot_extra_point(dxf, (x, height), n)
-                if plan and shift is not None:
-                    self._plot_extra_point(dxf, (x, shift + breadth), n)
+            for section, prefix in EXTRA_POINT_SECTIONS.items():
+                shift = self._plan_shift(section)
+                for n, (x, height, breadth) in enumerate(
+                    self.extra_points(section), 1
+                ):
+                    if profile:
+                        self._plot_extra_point(dxf, (x, height), "%s%d" % (prefix, n))
+                    if plan and shift is not None:
+                        self._plot_extra_point(
+                            dxf, (x, shift + breadth), "%s%d" % (prefix, n)
+                        )
 
     def waterlines_positions(self):
         """(virtual) Return a dictionary: ``{name: height}``. From
@@ -1376,6 +1414,14 @@ class Model:
         chine_points = self._station_points(positions, [chine] if chine else [])
         keel = self.keel_body_point()
         keel_points = self._station_points(positions, [keel] if keel else [])
+        keel_from_line = not keel
+        if keel_from_line:
+            # the keel line of the meta data file: its point of every station
+            keel_points = {
+                st: pt
+                for st in positions
+                if (pt := self.keel_point_at(st)) is not None
+            }
         for station in positions:
             poly = self.loft_body_line(station, body_points, skip_missing=True)
             keel_pt = self.keel_point_at(station)
@@ -1433,31 +1479,36 @@ class Model:
                 if right_side:
                     lines[station].append(poly)
 
-        # the extra points of the rabbet line are not at a station: they take
-        # part in the rabbet line like pseudo stations at their x
-        rabbet_all = dict(rabbet_points)
+        # the extra points are not at a station: they take part in the line
+        # of their element like pseudo stations at their x
+        element_points = {"rabbet": dict(rabbet_points), "keel": dict(keel_points)}
         positions_all = dict(positions)
-        extra_points = []  # (x, y, number of the extra point), per side drawn
-        for n, (x, height, breadth) in enumerate(self.rabbet_extra_points(), 1):
-            if sides == "half":
-                extra_flags = (False, True)
-            elif sides == "both":
-                extra_flags = (True, True)
-            elif widest is not None:
-                extra_flags = split_flags(x)
-            else:
-                continue
-            key = ("extra", n)
-            rabbet_all[key] = (breadth, height)
-            positions_all[key] = x
-            flags[key] = extra_flags
-            if extra_flags[0]:
-                extra_points.append((-breadth, height, n))
-            if extra_flags[1]:
-                extra_points.append((breadth, height, n))
+        extra_points = []  # (x, y, label of the extra point), per side drawn
+        for section, prefix in EXTRA_POINT_SECTIONS.items():
+            for n, (x, height, breadth) in enumerate(self.extra_points(section), 1):
+                if sides == "half":
+                    extra_flags = (False, True)
+                elif sides == "both":
+                    extra_flags = (True, True)
+                elif widest is not None:
+                    extra_flags = split_flags(x)
+                else:
+                    continue
+                key = (section, n)
+                element_points[section][key] = (breadth, height)
+                positions_all[key] = x
+                flags[key] = extra_flags
+                label = "%s%d" % (prefix, n)
+                if extra_flags[0]:
+                    extra_points.append((-breadth, height, label))
+                if extra_flags[1]:
+                    extra_points.append((breadth, height, label))
         sheer = self._joined_points(sheer_points, flags, positions)
-        rabbet = self._joined_points(rabbet_all, flags, positions_all)
-        keel = self._joined_points(keel_points, flags, positions)
+        rabbet = self._joined_points(element_points["rabbet"], flags, positions_all)
+        keel = self._joined_points(element_points["keel"], flags, positions_all)
+        if keel_from_line:
+            # a keel line of equal points (a keel on the base) is nothing
+            keel = [p for p in keel if len(set(p)) > 1]
         chine = self._joined_points(chine_points, flags, positions)
 
         x0 = self.body_plan_origin_x(lines, placement, gap, widest)
@@ -1471,7 +1522,7 @@ class Model:
             rabbet = [[(x + x0, y) for x, y in p] for p in rabbet]
             keel = [[(x + x0, y) for x, y in p] for p in keel]
             chine = [[(x + x0, y) for x, y in p] for p in chine]
-            extra_points = [(x + x0, y, n) for x, y, n in extra_points]
+            extra_points = [(x + x0, y, label) for x, y, label in extra_points]
         result = BodyLines(lines)
         result.sheer = sheer
         result.rabbet = rabbet
@@ -1662,8 +1713,8 @@ class Model:
             for poly in self.body_chine_polylines(lines):
                 dxf.add_red_polyline(poly)
         if extra_points:
-            for x, y, n in getattr(lines, "extra_points", ()):
-                self._plot_extra_point(dxf, (x, y), n)
+            for x, y, label in getattr(lines, "extra_points", ()):
+                self._plot_extra_point(dxf, (x, y), label)
 
     def body_sheer_polylines(self, lines: dict):
         """The sheer line of a body plan (``lines`` as returned by

@@ -615,8 +615,11 @@ class Test_RabbetExtraPointsInViews(unittest.TestCase):
         # C is forward (the bow), A is aft: the extra point at x = 250 is
         # forward (right), the one at x = -50 is aft (left)
         self.assertEqual(
-            [(4, 60, 1), (-3, 70, 2)],
-            [(round(x / self.MM), round(y / self.MM), n) for x, y, n in lines.extra_points],
+            [(4, 60, "E1"), (-3, 70, "E2")],
+            [
+                (round(x / self.MM), round(y / self.MM), n)
+                for x, y, n in lines.extra_points
+            ],
         )
         # they are on the rabbet line of the body plan
         pts = [self.mm(p) for p in lines.rabbet]
@@ -739,3 +742,116 @@ class Test_ChineLine(unittest.TestCase):
                 f.write(text)
             with self.assertRaises(ValueError, msg=text):
                 table_of_offsets.Model(csv)
+
+
+class Test_ExtraPointsOfTheKeel(unittest.TestCase):
+    """extra_points is not rabbet specific: here the keel line is only
+    extra points"""
+
+    MM = 1 / 25.4
+
+    def model(self, keel):
+        d = tempfile.mkdtemp()
+        csv = os.path.join(d, "t.csv")
+        with open(csv, "w") as f:
+            f.write(
+                "#,A,B,C,D\nHeight Sheer,100,100,100,100\n"
+                "Breadth Sheer,300,300,300,300\n"
+            )
+        with open(os.path.join(d, "t.grid"), "w") as f:
+            f.write(
+                '[table]\nunit = "mm"\nbow_station = "D"\n[stations]\nspacing = 100.0\n'
+                "[sheet]\ny_origins = [0, -500]\n" + keel
+            )
+        return table_of_offsets.Model(csv)
+
+    KEEL = (
+        "[keel]\nsiding = 40.0\nextra_points = [\n"
+        '  { station = "A", dx = 50.0, height = 10 },\n'
+        '  { station = "C", dx = 20.0, height = 30, breadth = 5 },\n]\n'
+    )
+
+    def mm(self, pts):
+        return [tuple(round(c / self.MM) for c in p) for p in pts]
+
+    def test_the_line_is_the_extra_points(self):
+        m = self.model(self.KEEL)
+        # the half-breadth: given, else half the siding
+        self.assertEqual([(50, 10, 20), (220, 30, 5)], self.mm(m.keel_points()))
+        self.assertEqual([(50, 10), (220, 30)], self.mm(m.keel_profile_line()))
+        self.assertEqual([(50, -480), (220, -495)], self.mm(m.keel_plan_line()))
+        self.assertIsNone(m.keel_point_at("A"))  # x = 0, before the line
+        x, y = m.keel_point_at("B")  # x = 100: 50/170 of the way
+        self.assertAlmostEqual((20 + 50 / 170 * (5 - 20)) * self.MM, x)
+        self.assertAlmostEqual((10 + 50 / 170 * 20) * self.MM, y)
+        self.assertIsNone(m.keel_point_at("D"))
+
+    def test_order_of_the_file_without_a_line(self):
+        """no x ordering: the shape of a stem can go back"""
+        m = self.model(
+            "[keel]\nextra_points = [\n"
+            '  { station = "C", height = 30 },\n  { station = "A", height = 10 },\n]\n'
+        )
+        self.assertEqual([(200, 30), (0, 10)], self.mm(m.keel_profile_line()))
+
+    def test_merged_with_the_line(self):
+        m = self.model(
+            '[keel]\nfrom = { station = "A", height = 0 }\n'
+            'to = { station = "D", height = 0 }\n'
+            'extra_points = [{ station = "B", dx = 10.0, height = 7 }]\n'
+        )
+        self.assertEqual(
+            [(0, 0), (110, 7), (300, 0)], self.mm(m.keel_profile_line())
+        )
+
+    def test_in_the_body_plan_and_marked(self):
+        m = self.model(self.KEEL)
+        lines = m.loft_body_lines(
+            [("Breadth Sheer", "Height Sheer")], "raw", sides="half"
+        )
+        # K1, the keel points of B and C, K2 (B and C have the keel point)
+        keel = [[(round(x / self.MM), round(y / self.MM)) for x, y in p] for p in lines.keel]
+        self.assertEqual(1, len(keel))
+        self.assertEqual((20, 10), keel[0][0])
+        self.assertEqual((5, 30), keel[0][-1])
+        self.assertEqual(4, len(keel[0]))  # K1, B, C, K2
+        self.assertEqual(
+            ["K1", "K2"], [label for _, _, label in lines.extra_points]
+        )
+
+        class Dxf:
+            def __init__(self):
+                self.texts = []
+
+            def add_red_polyline(self, line):
+                pass
+
+            def add_red_circle(self, center, radius):
+                pass
+
+            def text(self, xy, txt, **kw):
+                self.texts.append(txt)
+
+        dxf = Dxf()
+        m.plot_keel_and_rabbet(dxf)
+        self.assertEqual(["K1", "K1", "K2", "K2"], dxf.texts)
+
+    def test_only_the_known_elements(self):
+        """extra_points of an element that has none is an unknown key"""
+        with self.assertRaises(ValueError):
+            self.model(
+                '[chine]\nheight_row = "Height Sheer"\nbreadth_row = "Breadth Sheer"\n'
+                'extra_points = [{ station = "A", height = 1 }]\n'
+            )
+
+    def test_bad_keel_extra_points(self):
+        for text in (
+            "[keel]\nextra_points = 3\n",
+            '[keel]\nextra_points = [{ station = "A" }]\n',
+            '[keel]\nextra_points = [{ station = "A", height = 1, bogus = 2 }]\n',
+        ):
+            with self.assertRaises(ValueError, msg=text):
+                self.model(text)
+        m = self.model('[keel]\nextra_points = [{ station = "X", height = 1 }]\n')
+        with self.assertRaises(ValueError):
+            m.keel_points()
