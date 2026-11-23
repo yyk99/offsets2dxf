@@ -228,7 +228,7 @@ _META_KEYS = {
     "table": {"csv", "unit", "bow_station", "multi_value"},
     "stations": {"origin", "spacing", "positions"},
     "ghost_line": {"row", "height"},
-    "keel": {"from", "to", "siding", "extra_points"},
+    "keel": {"from", "to", "siding", "height_row", "breadth_row", "extra_points"},
     "rabbet": {"siding", "height_row", "breadth_row", "extra_points"},
     "chine": {"height_row", "breadth_row"},
     "sheet": {"y_origins", "vertical_borders"},
@@ -323,11 +323,13 @@ def load_meta(path: str) -> dict:
     if "chine" in meta and set(chine) != {"height_row", "breadth_row"}:
         raise bad("[chine] needs height_row and breadth_row")
     rabbet = meta.get("rabbet", {})
-    for key in ("height_row", "breadth_row"):
-        if key in rabbet and not (isinstance(rabbet[key], str) and rabbet[key]):
-            raise bad("[rabbet] %s must be the name of a table row" % key)
-    if "breadth_row" in rabbet and "height_row" not in rabbet:
-        raise bad("[rabbet] breadth_row needs height_row")
+    for section in ("keel", "rabbet"):
+        element = meta.get(section, {})
+        for key in ("height_row", "breadth_row"):
+            if key in element and not (isinstance(element[key], str) and element[key]):
+                raise bad("[%s] %s must be the name of a table row" % (section, key))
+        if "breadth_row" in element and "height_row" not in element:
+            raise bad("[%s] breadth_row needs height_row" % section)
 
     def good_point(p):
         """{ station, dx (optional), height | height_row,
@@ -758,18 +760,40 @@ class Model:
 
     def keel_points(self):
         """The points ``[(x, height, breadth)]`` of the keel line in the
-        profile view (unit of the model): the straight line of ``from`` and ``to`` of
-        ``[keel]`` (the half-breadth is half of its ``siding``, 0 if there is
-        none) merged by x with its ``extra_points``; without the line the
-        extra points, in the order of the file. [] if the file gives
-        neither."""
+        profile view (unit of the model): the points of the row
+        ``height_row`` of ``[keel]`` (like the rabbet; the half-breadth is
+        that of ``breadth_row`` at the same x, else the nearest one, else half
+        of ``siding``, 0 if there is none) and the straight line of ``from``
+        and ``to`` (half of ``siding``), merged by x with the ``extra_points``,
+        in the direction of the row (or of the line); without the row and the
+        line the extra points, in the order of the file. [] if the file gives
+        none of them."""
         line = self.keel_line()
         extra = self.extra_points("keel")
-        if line is None:
+        row = self._meta.get("keel", {}).get("height_row")
+        if row is None and line is None:
             return extra
         half = self.siding("keel", 0.0) / 2
-        base = [(x, y, half) for x, y in line]
-        descending = base[0][0] > base[1][0]
+        base = []
+        descending = False
+        if row is not None:
+            heights = self.loft_line_n(self.line_to_index(row))
+            breadths = self._section_breadths("keel")
+            exact = dict(breadths)
+
+            def breadth(x):
+                if x in exact:
+                    return exact[x]
+                if breadths:
+                    return min(breadths, key=lambda t: abs(t[0] - x))[1]
+                return half
+
+            base = [(x, y, breadth(x)) for x, y in heights]
+            descending = len(base) > 1 and base[0][0] > base[-1][0]
+        if line is not None:
+            if row is None:
+                descending = line[0][0] > line[1][0]
+            base += [(x, y, half) for x, y in line]
         return sorted(base + extra, key=lambda pt: pt[0], reverse=descending)
 
     def keel_point_at(self, station: str):
@@ -812,10 +836,13 @@ class Model:
         has one (the row ``breadth_row`` of the section, or half of its
         ``siding``). The height and the half-breadth can also be those of
         table rows at the station: ``height_row``, ``breadth_row`` of the
-        point ("the same as the sheer point")."""
+        point ("the same as the sheer point"); a ``height_row`` that is the
+        name of a waterline (``waterlines_positions``) is the height of the
+        waterline."""
         entry = self._meta.get(section, {})
         positions = self.station_positions()
         table = self._section_breadths(section)
+        waterlines = self.waterlines_positions() or {}
         points = []
         for p in entry.get("extra_points", []):
             if p["station"] not in positions:
@@ -823,7 +850,11 @@ class Model:
                     "[%s] extra_points: unknown station %r" % (section, p["station"])
                 )
             x = positions[p["station"]] + p.get("dx", 0.0)
-            if "height_row" in p:
+            if "height_row" in p and p["height_row"] in waterlines:
+                # a waterline: its height, not its row, which holds the
+                # half-breadths (drawn in the plan view, see base_offset)
+                height = waterlines[p["height_row"]]
+            elif "height_row" in p:
                 height = self.height_at(p["station"], p["height_row"])
             else:
                 height = float(p["height"])
