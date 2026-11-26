@@ -4,7 +4,8 @@ The table has 9 stations (1-8 and TRAN.) in two halves: heights (upper rows,
 e.g. "LWL to SHEER", "BASE TO B-2") and half-breadths (lower rows, e.g.
 "SHEER", "LWL"). Heights named "BASE ..." are measured from the base line;
 "LWL to ..." heights are measured from the LWL, which is ``_y_lwl`` above the
-base. Station 8 and TRAN. are placed specially in ``station_positions``.
+base. The grid (stations, waterlines, buttocks, rabbet, keel, sheet) is read
+from sample_data_too/offset_table_blue_moon.meta.
 
 Run: ``python3 projectbluemoon.py [--out-dir DIR] [--output-units UNIT]`` writes, into ./out (in the
 current directory) or DIR, tutorial_project_blue_moon.dxf (everything, body lines in
@@ -31,37 +32,7 @@ class ProjectBlueMoon(table_of_offsets.Model):
             ),
             unit="ftin",
         )
-        self.set_bow_station("1")  # the stem; the stern (TRAN.) is at x = 0
-        # fmt: off
-        self.set_under_waterline(
-            {
-            }
-        )
-        # fmt: on
         self._y_lwl = 4 * 12 + 1 + 7.0 / 8.0  # 4-1-7
-        self._y0 = 0.0
-        self._y1 = -120.0
-        pass
-
-    def station_positions(self):
-        """Return a dictionary of station positions
-        waterlines 0-9-0
-        stations   3-0-0
-        butts      1-0-0
-        7..8       1-8-4
-        """
-        station_positions = {}
-        for c in self._too.columns:
-            if c == "#":
-                pass
-            elif c == "TRAN.":
-                station_positions[c] = 0.0
-            elif c == "8":
-                station_positions[c] = 3 * 12 - 20.5  #  1-8-4 == 20.5
-            else:
-                assert c.isdecimal()
-                station_positions[c] = (8 - int(c)) * 12 * 3  # 1' == 12" (inches)
-        return station_positions
 
     def base_offset(self, line_name: str):
         """(virtual) Returns the vertical offset for the given line"""
@@ -80,32 +51,9 @@ class ProjectBlueMoon(table_of_offsets.Model):
             "KEEL",
             "BALLAST TOP",
         ]:
-            return self._y1
+            return self.plan_centerline_y()
 
         return 0
-
-    def grid_y_origins(self):
-        """(virtual) we want two horizontal (central) grid lines"""
-        return [0, -10 * 12.0]
-
-    def waterlines_positions(self):
-        wl = {
-            "WL 2A": 18.0,
-            "WL 1A": 9.0,
-            "LWL": 0.0,
-            "WL 1B": -9.0,
-            "WL 2B": -18.0,
-        }
-        for k in wl:
-            wl[k] += self._y_lwl
-        return wl
-
-    def buttocks_positions(self):
-        return {"BASE TO B-3": 36.0, "BASE TO B-2": 24.0, "BASE TO B-1": 12.0}
-
-    def grid_y_origins(self):
-        """(virtual): central lines will be drawn here"""
-        return [self._y0, self._y1]
 
     # 0         LWL to SHEER
     # 1      LWL to DECK EDG
@@ -133,9 +81,6 @@ class ProjectBlueMoon(table_of_offsets.Model):
 
     def keel_body_point(self):
         return ("KEEL", "KEEL TO BASE")
-
-    def rabbet_body_point(self):
-        return ("RABBET", "RABBET TO BASE")
 
     def body_lines(
         self,
@@ -191,8 +136,8 @@ class ProjectBlueMoon(table_of_offsets.Model):
             dxf.add_red_polyline(self.loft_line_n(2))
             dxf.add_red_polyline(self.loft_line_n(3))
             dxf.add_red_polyline(self.loft_line_n(4))
-            dxf.add_red_polyline(self.loft_line_n(5))
-            dxf.add_red_polyline(self.loft_line_n(6))
+            # rows 5 and 6 (RABBET TO BASE, KEEL TO BASE) are drawn by
+            # plot_keel_and_rabbet below, with the extra points
             dxf.add_red_polyline(self.loft_line_n(7))
             dxf.add_red_polyline(self.loft_line_n(8))
             #
@@ -204,6 +149,10 @@ class ProjectBlueMoon(table_of_offsets.Model):
             dxf.add_red_polyline(self.loft_line_n(12))
             dxf.add_red_polyline(self.loft_line_n(13))
             dxf.add_red_polyline(self.loft_line_n(14))
+
+            # the keel and the rabbet, in the profile and plan views, as the
+            # grid file gives them ([keel], [rabbet]), with the extra points
+            self.plot_keel_and_rabbet(dxf)
 
             # draw a body line
 
