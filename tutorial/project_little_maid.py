@@ -127,6 +127,14 @@ class ProjectLittleMaid(table_of_offsets.Model):
             ]:
                 dxf.add_red_polyline(self.loft_line_n_sorted(self.line_to_index(name)))
 
+            # the transom: the line from the plan centerline to the sheer at
+            # the station S (the body view has it as the section of S)
+            x = self.station_positions()["S"]
+            y0 = self.plan_centerline_y()
+            dxf.add_red_polyline(
+                [(x, y0), (x, y0 + self.breadth_at("S", "Breadth Sheer"))]
+            )
+
             # the keel and the rabbet, in the profile and plan views, as the
             # meta data file gives them ([keel], [rabbet])
             self.plot_keel_and_rabbet(dxf)
