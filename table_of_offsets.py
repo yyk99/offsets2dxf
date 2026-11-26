@@ -1139,7 +1139,8 @@ class Model:
         body_diagonals: dict = None,
     ):
         """Draw the grid into ``dxf`` (a ``DXF`` object): central lines, one
-        vertical line and label per station, waterlines and buttocks lines.
+        vertical line per station with its label at every central line and
+        near the top, waterlines and buttocks lines.
 
         ``profile_end_x`` - extend the base line (the first of
         ``grid_y_origins``) and the waterlines, with their right labels, to
@@ -1196,6 +1197,10 @@ class Model:
             # the station vertical intersection
             for s, x in stations.items():
                 dxf.text((x + inch(1), y + inch(1)), s)
+
+        # the names near the top of the station lines as well
+        for s, x in stations.items():
+            dxf.text((x + inch(1), top_y - inch(2)), s)
 
         # waterlines
         wl_right = right
