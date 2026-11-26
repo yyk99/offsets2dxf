@@ -332,13 +332,14 @@ def load_meta(path: str) -> dict:
             raise bad("[%s] breadth_row needs height_row" % section)
 
     def good_point(p):
-        """{ station, dx (optional), height | height_row,
+        """{ station, dx (optional), dy (optional), height | height_row,
         breadth | breadth_row (optional), edge (optional boolean) }"""
         if not isinstance(p, dict) or not isinstance(p.get("station"), str):
             return False
         allowed = {
             "station",
             "dx",
+            "dy",
             "height",
             "height_row",
             "breadth",
@@ -354,7 +355,11 @@ def load_meta(path: str) -> dict:
         if "edge" in p and not isinstance(p["edge"], bool):
             return False
         return all(
-            number(p[k]) if k in ("dx", "height", "breadth") else isinstance(p[k], str)
+            (
+                number(p[k])
+                if k in ("dx", "dy", "height", "breadth")
+                else isinstance(p[k], str)
+            )
             for k in set(p) - {"station", "edge"}
         )
 
@@ -363,7 +368,7 @@ def load_meta(path: str) -> dict:
         if not isinstance(points, list) or not all(map(good_point, points)):
             raise bad(
                 '[%s] extra_points must be a list of { station = "..", '
-                'dx = N (optional), height = N or height_row = "..", '
+                'dx = N (optional), dy = N (optional), height = N or height_row = "..", '
                 'breadth = N or breadth_row = ".." (optional), '
                 "edge = true or false (optional) }" % section
             )
@@ -838,7 +843,8 @@ class Model:
         table rows at the station: ``height_row``, ``breadth_row`` of the
         point ("the same as the sheer point"); a ``height_row`` that is the
         name of a waterline (``waterlines_positions``) is the height of the
-        waterline."""
+        waterline. ``dx`` and ``dy`` (default 0) are added to the x of the
+        station and to the height."""
         entry = self._meta.get(section, {})
         positions = self.station_positions()
         table = self._section_breadths(section)
@@ -858,6 +864,7 @@ class Model:
                 height = self.height_at(p["station"], p["height_row"])
             else:
                 height = float(p["height"])
+            height += p.get("dy", 0.0)
             if "breadth_row" in p:
                 breadth = self.breadth_at(p["station"], p["breadth_row"])
             elif "breadth" in p:
