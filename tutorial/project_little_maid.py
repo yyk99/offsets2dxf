@@ -17,16 +17,17 @@ Table layout: stations ``A``, ``0`` .. ``12``, ``C``, ``S``; ``Height Sheer``
 Chine``, ``Height B1``, ``Height Rabbet``, ``Height Top of Iron Keel``,
 ``Height Keel``, ``Height Prop Shaft`` (heights above the base line),
 ``Breadth Sheer``, ``Breadth LL 6`` .. ``Breadth LL 2``, ``Breadth Chine``
-(half-breadths) and ``Diagonal D1``, ``D2``, ``D4`` (not used: their
-definitions are not in the meta data file yet). The cells of ``Height Keel``
+(half-breadths) and ``Diagonal D1``, ``D2``, ``D4`` (in the grid file; drawn
+in the plan view). The cells of ``Height Keel``
 and ``Height Top of Iron Keel`` that are ``straight`` are filled with the values
 on the straight line.
 
 Run: ``python3 project_little_maid.py [--out-dir DIR] [--output-units UNIT]``
 writes, into ./out (in the current directory) or DIR,
 tutorial_project_little_maid.dxf (everything, the body lines in the middle of
-the profile view) and tutorial_project_little_maid_body.dxf (the body view
-alone).
+the profile view), tutorial_project_little_maid_body_split.dxf (everything, the
+split body plan to the right of the profile view) and
+tutorial_project_little_maid_body.dxf (the body view alone).
 """
 
 import context
@@ -64,11 +65,15 @@ class ProjectLittleMaid(table_of_offsets.Model):
     def body_points(self):
         """The (breadth, height) points of a body line, without the
         waterlines (``loft_body_lines`` adds them): the sheer, the chine and
-        the rabbet. The stations where a cell is empty have no such point."""
+        the rabbet and the buttock B1. The stations where a cell is empty have no such point.
+        """
         return [
             ("Breadth Sheer", "Height Sheer"),
             self.chine_body_point(),
             self.rabbet_body_point(),
+            # the buttock B1: its height from the table, its half-breadth
+            # from [buttocks] of the meta data file
+            (self.buttocks_positions()["B1"], "Height B1"),
         ]
 
     def body_lines(
@@ -92,13 +97,23 @@ class ProjectLittleMaid(table_of_offsets.Model):
             self.plot_body_plan_grid(dxf, lines)
             self.plot_body_lines(dxf, lines)
 
-    def save_model_as(self, filename_dxf: str):
-        body_lines = self.body_lines()
+    def save_model_as(
+        self,
+        filename_dxf: str,
+        body_placement: str = "max_breadth",
+        body_sides: str = None,
+    ):
+        body_lines = self.body_lines(body_placement, body_sides)
+        grid_options = {}
+        if body_placement == "right":
+            # run the base line and the waterlines through the body plan,
+            # draw the body plan centerline, the buttocks and the diagonals
+            grid_options = self.body_plan_grid_options(body_lines, body_sides)
         with self.open_dxf(filename_dxf) as dxf:
-            self.plot_grid(dxf)
+            self.plot_grid(dxf, **grid_options)
 
             # profile view
-            for name in ["Height Sheer", "Height Chine"]:
+            for name in ["Height Sheer", "Height Chine", "Height B1"]:
                 dxf.add_red_polyline(self.loft_line_n_sorted(self.line_to_index(name)))
 
             # plan view
@@ -116,6 +131,9 @@ class ProjectLittleMaid(table_of_offsets.Model):
             # meta data file gives them ([keel], [rabbet])
             self.plot_keel_and_rabbet(dxf)
 
+            # the diagonals in the plan view, below the plan centerline
+            self.plot_diagonal_plan_lines(dxf)
+
             # body plan
             self.plot_body_lines(dxf, body_lines)
 
@@ -131,6 +149,14 @@ if __name__ == "__main__":
     proj.set_output_unit(args.output_units)
     proj.save_model_as(out("tutorial_project_little_maid.dxf"))
     print("Saved as:", out("tutorial_project_little_maid.dxf"))
+    # the body plan to the right of the profile view, clear of it: the aft
+    # stations left of its centerline, the forward stations right
+    proj.save_model_as(
+        out("tutorial_project_little_maid_body_split.dxf"),
+        body_placement="right",
+        body_sides="split",
+    )
+    print("Saved as:", out("tutorial_project_little_maid_body_split.dxf"))
     proj.save_body_lines_as(out("tutorial_project_little_maid_body.dxf"))
     print("Saved as:", out("tutorial_project_little_maid_body.dxf"))
 
