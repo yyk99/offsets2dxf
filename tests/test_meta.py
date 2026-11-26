@@ -1036,6 +1036,37 @@ class Test_ExtraPointHeightRowIsAWaterline(unittest.TestCase):
         self.assertEqual([9.0, 15.0, 20.0], [x for x, _, _ in points])
 
 
+class Test_ExtraPointDy(unittest.TestCase):
+    """dy of an extra point is added to its height (a number or a row)"""
+
+    def model(self, points):
+        d = tempfile.mkdtemp()
+        csv = os.path.join(d, "t.csv")
+        with open(csv, "w") as f:
+            f.write("#,A,B\nHeight RL,0-6-0,0-6-0\n")
+        with open(os.path.join(d, "t.grid"), "w") as f:
+            f.write(
+                "[table]\nunit = 'ftin'\n[rabbet]\nheight_row = 'Height RL'\n"
+                "extra_points = [%s]\n" % points
+            )
+        return table_of_offsets.Model(csv)
+
+    def test_dy(self):
+        m = self.model(
+            "{ station = 'A', height = 10.0, dy = -2.5 },"
+            "{ station = 'A', dx = 3.0, height_row = 'Height RL', dy = 1.5 },"
+            "{ station = 'B', height = 4.0 }"
+        )
+        self.assertEqual(
+            [(0.0, 7.5), (3.0, 7.5), (12.0, 4.0)],
+            [(x, h) for x, h, _ in m.extra_points("rabbet")],
+        )
+
+    def test_dy_must_be_a_number(self):
+        with self.assertRaises(ValueError):
+            self.model("{ station = 'A', height = 1.0, dy = 'up' }")
+
+
 class Test_KeelRows(unittest.TestCase):
     """[keel] height_row and breadth_row, like [rabbet]"""
 
