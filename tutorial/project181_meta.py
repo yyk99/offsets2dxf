@@ -127,7 +127,7 @@ class Project181Meta(table_of_offsets.Model):
                 '36" Buttock',
                 '24" Buttock',
                 '12" Buttock',
-                "Profile",  # the keel
+                # plot_keel_and_rabbet draws both from [keel] and [rabbet].
             ]:
                 dxf.add_red_polyline(self.loft_line_n_sorted(self.line_to_index(name)))
 
@@ -143,8 +143,8 @@ class Project181Meta(table_of_offsets.Model):
             ]:
                 dxf.add_red_polyline(self.loft_line_n_sorted(self.line_to_index(name)))
 
-            # the rabbet, in the profile and plan views, as the grid file
-            # gives it ([rabbet])
+            # the keel and the rabbet, in the profile and plan views, as the
+            # grid file gives them ([keel], [rabbet])
             self.plot_keel_and_rabbet(dxf)
 
             # the diagonals in the plan view, below the plan centerline

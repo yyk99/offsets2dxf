@@ -999,3 +999,132 @@ class Test_EdgesInTheOrthogonalViews(unittest.TestCase):
             {"station": "A", "height": 10.0},
         ]
         self.assertEqual([], m.edge_plan_lines())
+
+
+class Test_ExtraPointHeightRowIsAWaterline(unittest.TestCase):
+    """height_row naming a waterline: the height of the waterline, not the
+    value of the row of the same name (its half-breadths, drawn in the plan
+    view below the profile view by base_offset)"""
+
+    class Model(table_of_offsets.Model):
+        def base_offset(self, line_name):
+            return -100.0 if line_name in ("DWL", "8 LL") else 0.0
+
+    def model(self):
+        d = tempfile.mkdtemp()
+        csv = os.path.join(d, "t.csv")
+        with open(csv, "w") as f:
+            f.write(
+                "#,A,B\nHeight RL,0-6-0,0-6-0\nDWL,0-5-6,0-5-6\n8 LL,0-10-4,0-10-4\n"
+            )
+        with open(os.path.join(d, "t.grid"), "w") as f:
+            f.write(
+                "[table]\nunit = 'ftin'\n[sheet]\ny_origins = [0, -100]\n"
+                "[waterlines]\nDWL = { height = 0.0 }\n'8 LL' = { height = 8.0 }\n"
+                "[rabbet]\nheight_row = 'Height RL'\n"
+                "extra_points = [\n"
+                "  { station = 'A', dx = 9.0, height_row = 'DWL', breadth = 3.5 },\n"
+                "  { station = 'A', dx = 15.0, height_row = '8 LL', breadth = 3.5 },\n"
+                "  { station = 'A', dx = 20.0, height_row = 'Height RL', breadth = 3.5 },\n"
+                "]\n"
+            )
+        return self.Model(csv)
+
+    def test_heights(self):
+        points = self.model().extra_points("rabbet")
+        self.assertEqual([0.0, 8.0, 6.0], [h for _, h, _ in points])
+        self.assertEqual([9.0, 15.0, 20.0], [x for x, _, _ in points])
+
+
+class Test_ExtraPointDy(unittest.TestCase):
+    """dy of an extra point is added to its height (a number or a row)"""
+
+    def model(self, points):
+        d = tempfile.mkdtemp()
+        csv = os.path.join(d, "t.csv")
+        with open(csv, "w") as f:
+            f.write("#,A,B\nHeight RL,0-6-0,0-6-0\n")
+        with open(os.path.join(d, "t.grid"), "w") as f:
+            f.write(
+                "[table]\nunit = 'ftin'\n[rabbet]\nheight_row = 'Height RL'\n"
+                "extra_points = [%s]\n" % points
+            )
+        return table_of_offsets.Model(csv)
+
+    def test_dy(self):
+        m = self.model(
+            "{ station = 'A', height = 10.0, dy = -2.5 },"
+            "{ station = 'A', dx = 3.0, height_row = 'Height RL', dy = 1.5 },"
+            "{ station = 'B', height = 4.0 }"
+        )
+        self.assertEqual(
+            [(0.0, 7.5), (3.0, 7.5), (12.0, 4.0)],
+            [(x, h) for x, h, _ in m.extra_points("rabbet")],
+        )
+
+    def test_dy_must_be_a_number(self):
+        with self.assertRaises(ValueError):
+            self.model("{ station = 'A', height = 1.0, dy = 'up' }")
+
+
+class Test_KeelRows(unittest.TestCase):
+    """[keel] height_row and breadth_row, like [rabbet]"""
+
+    def model(self, keel, extra=""):
+        d = tempfile.mkdtemp()
+        csv = os.path.join(d, "t.csv")
+        with open(csv, "w") as f:
+            f.write(
+                "#,FP,1,2,3\nProfile,,2-0-0,1-0-0,0-6-0\n"
+                "Keel Breadth,,0-3-0,0-2-0,\n"
+            )
+        with open(os.path.join(d, "t.grid"), "w") as f:
+            f.write(
+                "[table]\nunit = 'ftin'\n[stations]\nspacing = -24\norigin = 72\n"
+                "[sheet]\ny_origins = [0, -100]\n[keel]\n%s\n%s" % (keel, extra)
+            )
+        return table_of_offsets.Model(csv)
+
+    def test_row_with_a_siding(self):
+        m = self.model('height_row = "Profile"\nsiding = 4.0\n')
+        # FP has no cell; the x of the stations 1, 2, 3: 48, 24, 0
+        self.assertEqual(
+            [(48.0, 24.0, 2.0), (24.0, 12.0, 2.0), (0.0, 6.0, 2.0)],
+            m.keel_points(),
+        )
+        self.assertEqual([(x, y) for x, y, _ in m.keel_points()], m.keel_profile_line())
+        self.assertEqual(
+            [(48.0, -98.0), (24.0, -98.0), (0.0, -98.0)], m.keel_plan_line()
+        )
+
+    def test_breadth_row(self):
+        """the breadth of the row at the same x, else the nearest one"""
+        m = self.model('height_row = "Profile"\nbreadth_row = "Keel Breadth"\n')
+        self.assertEqual(
+            [(48.0, 24.0, 3.0), (24.0, 12.0, 2.0), (0.0, 6.0, 2.0)],
+            m.keel_points(),
+        )
+
+    def test_extra_points_are_merged_by_x(self):
+        m = self.model(
+            'height_row = "Profile"\nbreadth_row = "Keel Breadth"\n',
+            "extra_points = [\n"
+            '  { station = "1", dx = 6.0, height = 20, breadth = 1 },\n'
+            '  { station = "2", dx = 6.0, height = 9, breadth = 1 },\n'
+            "]\n",
+        )
+        # the extra points are at x = 54 and 30
+        self.assertEqual(
+            [54.0, 48.0, 30.0, 24.0, 0.0], [x for x, _, _ in m.keel_points()]
+        )
+
+    def test_the_section_goes_down_to_the_row(self):
+        m = self.model('height_row = "Profile"\nsiding = 4.0\n')
+        self.assertEqual((2.0, 12.0), m.keel_point_at("2"))
+        # between two stations: interpolated
+        self.assertIsNone(m.keel_point_at("FP"))
+
+    def test_errors(self):
+        for keel in ('breadth_row = "x"', "height_row = 1", 'height_row = ""'):
+            with self.assertRaises(ValueError, msg=keel):
+                self.model(keel)
