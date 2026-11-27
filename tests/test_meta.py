@@ -1128,3 +1128,57 @@ class Test_KeelRows(unittest.TestCase):
         for keel in ('breadth_row = "x"', "height_row = 1", 'height_row = ""'):
             with self.assertRaises(ValueError, msg=keel):
                 self.model(keel)
+
+
+class Test_Patches(unittest.TestCase):
+    CSV = "#,1,2,3\nSheer,1-0-0,1-2-0,\nKeel,0-1-0,0-1-4,0-1-6\n"
+
+    def model(self, meta_text):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        csv_path = os.path.join(tmp.name, "t.csv")
+        with open(csv_path, "w") as f:
+            f.write(self.CSV)
+        with open(os.path.join(tmp.name, "t.meta"), "w") as f:
+            f.write('[table]\nunit = "ftin"\n[stations]\nspacing = 12\n' + meta_text)
+        return table_of_offsets.Model(csv_path)
+
+    def cell(self, model, row, station):
+        return model.offset_to_length(model._too.loc[model.line_to_index(row), station])
+
+    def test_patch(self):
+        m = self.model(
+            '[patches]\nSheer = [\n { station = "2", value = "1-3-0", was = "1-2-0", note = "x" },\n'
+            ' { station = "3", value = "1-4-0", was = "" },\n]\n'
+            'Keel = [{ station = "1", value = "0-2-0" }]\n'
+        )
+        self.assertEqual(15.0, self.cell(m, "Sheer", "2"))
+        self.assertEqual(16.0, self.cell(m, "Sheer", "3"))  # an empty cell
+        self.assertEqual(2.0, self.cell(m, "Keel", "1"))
+        self.assertEqual(12.0, self.cell(m, "Sheer", "1"))
+        self.assertEqual(
+            [
+                table_of_offsets.Patch("Sheer", "2", "1-2-0", "1-3-0", "x"),
+                table_of_offsets.Patch("Sheer", "3", "", "1-4-0", ""),
+                table_of_offsets.Patch("Keel", "1", "0-1-0", "0-2-0", ""),
+            ],
+            m.patches(),
+        )
+
+    def test_no_patches(self):
+        self.assertEqual([], self.model("").patches())
+
+    def test_errors(self):
+        for text in [
+            'Nope = [{ station = "1", value = "0-1-0" }]',  # no such row
+            'Sheer = [{ station = "9", value = "0-1-0" }]',  # no such station
+            'Sheer = [{ station = "1", value = "0-1-0", was = "1-0-1" }]',  # was
+            'Sheer = [{ station = "1", value = "x-y" }]',  # not a cell
+            'Sheer = [{ station = "1", value = "1-0-1" }, { station = "1", value = "1-0-2" }]',
+            'Sheer = [{ station = "1" }]',
+            'Sheer = [{ station = "1", value = "1-0-1", nope = 1 }]',
+            'Sheer = { station = "1", value = "1-0-1" }',
+            "Sheer = []",
+        ]:
+            with self.assertRaises(ValueError, msg=text):
+                self.model("[patches]\n" + text + "\n")

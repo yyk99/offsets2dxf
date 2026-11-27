@@ -4,13 +4,17 @@ The table has 9 stations (1-8 and TRAN.) in two halves: heights (upper rows,
 e.g. "LWL to SHEER", "BASE TO B-2") and half-breadths (lower rows, e.g.
 "SHEER", "LWL"). Heights named "BASE ..." are measured from the base line;
 "LWL to ..." heights are measured from the LWL, which is ``_y_lwl`` above the
-base. Station 8 and TRAN. are placed specially in ``station_positions``.
+base. The grid (stations, waterlines, buttocks, rabbet, keel, sheet) is read
+from sample_data_too/offset_table_blue_moon.meta.
 
 Run: ``python3 projectbluemoon.py [--out-dir DIR] [--output-units UNIT]`` writes, into ./out (in the
 current directory) or DIR, tutorial_project_blue_moon.dxf (everything, body lines in
 the middle of the profile view), tutorial_project_blue_moon_body_right.dxf (body
 plan to the right of the profile view), tutorial_project_blue_moon_body_split.dxf
-(aft/forward halves) and tutorial_project_blue_moon_body.dxf (body lines only).
+(aft/forward halves), tutorial_project_blue_moon_body.dxf (body lines only),
+tutorial_project_blue_moon_station6.dxf (the body line of the station 6 with every
+point labelled) and tutorial_project_blue_moon_diagonals.dxf (the plan view with the
+diagonals, their hull points labelled with the table values).
 """
 
 import context
@@ -31,37 +35,8 @@ class ProjectBlueMoon(table_of_offsets.Model):
             ),
             unit="ftin",
         )
-        self.set_bow_station("1")  # the stem; the stern (TRAN.) is at x = 0
-        # fmt: off
-        self.set_under_waterline(
-            {
-            }
-        )
-        # fmt: on
-        self._y_lwl = 4 * 12 + 1 + 7.0 / 8.0  # 4-1-7
-        self._y0 = 0.0
-        self._y1 = -120.0
-        pass
-
-    def station_positions(self):
-        """Return a dictionary of station positions
-        waterlines 0-9-0
-        stations   3-0-0
-        butts      1-0-0
-        7..8       1-8-4
-        """
-        station_positions = {}
-        for c in self._too.columns:
-            if c == "#":
-                pass
-            elif c == "TRAN.":
-                station_positions[c] = 0.0
-            elif c == "8":
-                station_positions[c] = 3 * 12 - 20.5  #  1-8-4 == 20.5
-            else:
-                assert c.isdecimal()
-                station_positions[c] = (8 - int(c)) * 12 * 3  # 1' == 12" (inches)
-        return station_positions
+        # the one variable of the data: the height of the LWL above the base line
+        self._y_lwl = self.waterlines_positions()["LWL"]
 
     def base_offset(self, line_name: str):
         """(virtual) Returns the vertical offset for the given line"""
@@ -80,32 +55,9 @@ class ProjectBlueMoon(table_of_offsets.Model):
             "KEEL",
             "BALLAST TOP",
         ]:
-            return self._y1
+            return self.plan_centerline_y()
 
         return 0
-
-    def grid_y_origins(self):
-        """(virtual) we want two horizontal (central) grid lines"""
-        return [0, -10 * 12.0]
-
-    def waterlines_positions(self):
-        wl = {
-            "WL 2A": 18.0,
-            "WL 1A": 9.0,
-            "LWL": 0.0,
-            "WL 1B": -9.0,
-            "WL 2B": -18.0,
-        }
-        for k in wl:
-            wl[k] += self._y_lwl
-        return wl
-
-    def buttocks_positions(self):
-        return {"BASE TO B-3": 36.0, "BASE TO B-2": 24.0, "BASE TO B-1": 12.0}
-
-    def grid_y_origins(self):
-        """(virtual): central lines will be drawn here"""
-        return [self._y0, self._y1]
 
     # 0         LWL to SHEER
     # 1      LWL to DECK EDG
@@ -131,21 +83,24 @@ class ProjectBlueMoon(table_of_offsets.Model):
 
     # {'LWL to SHEER': 0, 'LWL to DECK EDG': 1, 'BASE TO B-3': 2, 'BASE TO B-2': 3, 'BASE TO B-1': 4, 'RABBET TO BASE': 5, 'KEEL TO BASE': 6, 'CENTERLINE SHAFT': 7, 'BASE TO TOP BAL.': 8, 'SHEER': 9, 'WL 2A': 10, 'WL 1A': 11, 'LWL': 12, 'WL 1B': 13, 'WL 2B': 14, 'RABBET': 15, 'KEEL': 16, 'BALLAST TOP': 17, 'D. UPPER': 18, 'D. LOWER': 19, nan: 20, 'RED-CORRECTED': 21}
 
+    def diagonal_extension(self):
+        """The diagonals reach 6" beyond the farthest hull point"""
+        return 6.0
+
+    def diagonal_plan_from_centerline(self):
+        """In the plan view a diagonal is drawn at the distance from the
+        centerline given by the table cell (D. LOWER at the station 6 is
+        2-2-4 from the centerline)"""
+        return True
+
     def keel_body_point(self):
         return ("KEEL", "KEEL TO BASE")
 
-    def rabbet_body_point(self):
-        return ("RABBET", "RABBET TO BASE")
-
-    def body_lines(
-        self,
-        placement: str = "max_breadth",
-        sides: str = None,
-        bow_station: str = None,
-    ):
-        """Return {station: polyline} with the body plan line of every station"""
-        # (breadth, height) pairs. A string is a table row, a number is inches.
-        body_points = [
+    def body_points(self):
+        """The (breadth, height) points of a body line, without the waterlines
+        (``loft_body_lines`` adds them). A string is a table row, a number is
+        inches."""
+        return [
             ("SHEER", "LWL to SHEER"),
             ("RABBET", "RABBET TO BASE"),
             ("KEEL", "KEEL TO BASE"),
@@ -156,9 +111,53 @@ class ProjectBlueMoon(table_of_offsets.Model):
             (24.0, "BASE TO B-2"),
             (12.0, "BASE TO B-1"),
         ]
+
+    def body_lines(
+        self,
+        placement: str = "max_breadth",
+        sides: str = None,
+        bow_station: str = None,
+    ):
+        """Return {station: polyline} with the body plan line of every station"""
         return self.loft_body_lines(
-            body_points, placement, sides=sides, bow_station=bow_station
+            self.body_points(), placement, sides=sides, bow_station=bow_station
         )
+
+    def save_station_as(self, filename_dxf: str, station: str = "6"):
+        """Save the body line of one station for checking the data: every point
+        is labelled with the table rows its coordinates come from."""
+        with self.open_dxf(filename_dxf) as dxf:
+            self.plot_annotated_body_line(
+                dxf, station, self.body_points(), point_text_height=1.0
+            )
+
+    def save_diagonals_as(self, filename_dxf: str):
+        """Save the plan view with the diagonals for checking: the grid, the
+        sheer and the waterlines, the diagonals (below the plan centerline) and
+        every hull point of a diagonal marked with a circle and labelled
+        ``station: row, the table cell`` (the distance from the plan centerline)."""
+        with self.open_dxf(filename_dxf) as dxf:
+            self.plot_grid(dxf)
+            # the half-breadths: the sheer and the waterlines
+            for n in range(9, 15):
+                dxf.add_red_polyline(self.loft_line_n(n))
+            self.plot_diagonal_plan_lines(dxf)
+
+            origin_y = self.plan_centerline_y()
+            positions = self.station_positions()
+            for point in self.diagonal_body_points():
+                points = self._station_points(positions, [point])
+                for station, (breadth, _) in points.items():
+                    distance = self.diagonal_plan_breadth(point, breadth)
+                    x, y = positions[station], origin_y - distance
+                    dxf.add_circle((x, y), self.inches(0.75), "extra_points")
+                    dxf.text(
+                        (x + self.inches(1), y - self.inches(2)),
+                        "%s: %s %s"
+                        % (station, point.row, self.format_length(distance)),
+                        height=self.inches(1.0),
+                        layer="extra_points",
+                    )
 
     def save_body_lines_as(
         self, filename_dxf: str, placement: str = "max_breadth", sides: str = None
@@ -191,8 +190,8 @@ class ProjectBlueMoon(table_of_offsets.Model):
             dxf.add_red_polyline(self.loft_line_n(2))
             dxf.add_red_polyline(self.loft_line_n(3))
             dxf.add_red_polyline(self.loft_line_n(4))
-            dxf.add_red_polyline(self.loft_line_n(5))
-            dxf.add_red_polyline(self.loft_line_n(6))
+            # rows 5 and 6 (RABBET TO BASE, KEEL TO BASE) are drawn by
+            # plot_keel_and_rabbet below, with the extra points
             dxf.add_red_polyline(self.loft_line_n(7))
             dxf.add_red_polyline(self.loft_line_n(8))
             #
@@ -204,6 +203,13 @@ class ProjectBlueMoon(table_of_offsets.Model):
             dxf.add_red_polyline(self.loft_line_n(12))
             dxf.add_red_polyline(self.loft_line_n(13))
             dxf.add_red_polyline(self.loft_line_n(14))
+
+            # the keel and the rabbet, in the profile and plan views, as the
+            # grid file gives them ([keel], [rabbet]), with the extra points
+            self.plot_keel_and_rabbet(dxf)
+
+            # the diagonals in the plan view, below the plan centerline
+            self.plot_diagonal_plan_lines(dxf)
 
             # draw a body line
 
@@ -262,5 +268,13 @@ if __name__ == "__main__":
     )
     proj.save_body_lines_as(out("tutorial_project_blue_moon_body.dxf"))
     print("Saved as:", out("tutorial_project_blue_moon_body.dxf"))
+    # one station, every point labelled with the source of its coordinates
+    proj.save_station_as(out("tutorial_project_blue_moon_station6.dxf"), "6")
+    print("Saved as:", out("tutorial_project_blue_moon_station6.dxf"))
+    # the diagonal rows against the hull: the misprints of the table
+    print(proj.diagonal_check_report(proj.check_diagonals(proj.body_points())))
+    # the diagonals and their hull points, labelled with the table values
+    proj.save_diagonals_as(out("tutorial_project_blue_moon_diagonals.dxf"))
+    print("Saved as:", out("tutorial_project_blue_moon_diagonals.dxf"))
 
 # end of file
