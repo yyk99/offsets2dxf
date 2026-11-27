@@ -158,6 +158,9 @@ class ProjectBlueMoon(table_of_offsets.Model):
             # grid file gives them ([keel], [rabbet]), with the extra points
             self.plot_keel_and_rabbet(dxf)
 
+            # the diagonals in the plan view, below the plan centerline
+            self.plot_diagonal_plan_lines(dxf)
+
             # draw a body line
 
             # the pairs of point making a body line
