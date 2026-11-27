@@ -16,6 +16,11 @@ class Test_LoadMeta(unittest.TestCase):
                 f.write(text)
             return table_of_offsets.load_meta(path)
 
+    def test_dwl(self):
+        self.assertEqual(49.0, self.load("[table]\ndwl = 49.0\n")["table"]["dwl"])
+        with self.assertRaises(ValueError):
+            self.load('[table]\ndwl = "49"\n')
+
     def test_sample(self):
         meta = table_of_offsets.load_meta(META)
         self.assertEqual("ftin", meta["table"]["unit"])
@@ -185,6 +190,79 @@ class Test_ModelMeta(unittest.TestCase):
         self.assertEqual((-120.0, 240.0), model.drawing_area_vertical_borders())
         # "0-2-0 and 0-3-0": the first value
         self.assertEqual(2.0, model.breadth_at("20", "Profile Plan"))
+
+    def test_waterline_dy(self):
+        d = tempfile.mkdtemp()
+        csv = os.path.join(d, "t.csv")
+        with open(csv, "w") as f:
+            f.write("#,1\nHeight Sheer,100\n")
+
+        def model(text):
+            with open(os.path.join(d, "t.meta"), "w") as f:
+                f.write('[table]\nunit = "mm"\n' + text + "[stations]\nspacing = 1\n")
+            return table_of_offsets.Model(csv)
+
+        m = model(
+            "dwl = 49.85\n[waterlines]\nLWL = { dy = 0.0 }\n"
+            "UP = { dy = 9.0 }\nBASE = { height = 0 }\n"
+        )
+        self.assertEqual(
+            {"LWL": 49.85, "UP": 58.85, "BASE": 0.0}, m.waterlines_positions()
+        )
+        for text in (
+            "[waterlines]\nA = { dy = 1.0 }\n",  # no dwl
+            "dwl = 1\n[waterlines]\nA = { dy = 1.0, height = 2 }\n",
+            "dwl = 1\n[waterlines]\nA = {}\n",
+        ):
+            with self.assertRaises(ValueError, msg=text):
+                model(text)
+
+    def test_diagonal_dy(self):
+        d = tempfile.mkdtemp()
+        csv = os.path.join(d, "t.csv")
+        with open(csv, "w") as f:
+            f.write("#,1\nHeight Sheer,100\n")
+
+        def model(text):
+            with open(os.path.join(d, "t.meta"), "w") as f:
+                f.write('[table]\nunit = "mm"\n' + text + "[stations]\nspacing = 1\n")
+            return table_of_offsets.Model(csv)
+
+        m = model(
+            "dwl = 50.0\n[diagonals]\n"
+            'D1 = { row = "a", from = { dy = 0.0 }, through = { x = 18.0, dy = -18.0 } }\n'
+            'D2 = { row = "b", from = [0.0, 70.0], through = { x = 34.0, dy = 0.0 } }\n'
+            'D3 = { row = "c", from = { x = 0, dy = 5.0 }, through = [10.0, 20.0] }\n'
+        )
+        self.assertEqual(
+            {
+                "D1": (50.0, 18.0, 32.0),
+                "D2": (70.0, 34.0, 50.0),
+                "D3": (55.0, 10.0, 20.0),
+            },
+            m.diagonals_positions(),
+        )
+        d1 = '[diagonals]\nD = { row = "a", from = %s, through = %s }\n'
+        for text in (
+            "dwl = 1\n" + d1 % ("{ dy = 0 }", "{ x = 1 }"),  # no dy
+            "dwl = 1\n" + d1 % ("{ dy = 0 }", "{ x = 1, y = 2, dy = 3 }"),  # x, y, dy
+            "dwl = 1\n" + d1 % ("{ x = 1, dy = 0 }", "{ dy = 1 }"),  # from off center
+            d1 % ("{ dy = 0 }", "[1, 2]"),  # dy needs dwl
+            "dwl = 1\n" + d1 % ("{ dy = 0 }", "{ x = 'a', dy = 1 }"),
+        ):
+            with self.assertRaises(ValueError, msg=text):
+                model(text)
+
+    def test_dwl_of_the_model(self):
+        d = tempfile.mkdtemp()
+        csv = os.path.join(d, "t.csv")
+        with open(csv, "w") as f:
+            f.write("#,1\nHeight Sheer,100\n")
+        meta = os.path.join(d, "t.meta")
+        with open(meta, "w") as f:
+            f.write('[table]\nunit = "mm"\ndwl = 1800\n[stations]\nspacing = 1\n')
+        self.assertEqual(1800.0, table_of_offsets.Model(csv).dwl())
+        self.assertIsNone(table_of_offsets.Model(CSV, unit="ftin", meta=False).dwl())
 
     def test_no_meta(self):
         """meta=False: no file; the defaults of the base class"""

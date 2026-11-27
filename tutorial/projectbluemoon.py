@@ -36,7 +36,7 @@ class ProjectBlueMoon(table_of_offsets.Model):
             unit="ftin",
         )
         # the one variable of the data: the height of the LWL above the base line
-        self._y_lwl = self.waterlines_positions()["LWL"]
+        self._y_lwl = self.dwl()
 
     def base_offset(self, line_name: str):
         """(virtual) Returns the vertical offset for the given line"""

@@ -231,7 +231,7 @@ Patch = collections.namedtuple("Patch", "row station was value note")
 
 # the sections of a meta data file and the keys of the plain ones
 _META_KEYS = {
-    "table": {"csv", "unit", "bow_station", "multi_value"},
+    "table": {"csv", "unit", "bow_station", "multi_value", "dwl"},
     "stations": {"origin", "spacing", "positions"},
     "ghost_line": {"row", "height"},
     "keel": {"from", "to", "siding", "height_row", "breadth_row", "extra_points"},
@@ -242,9 +242,18 @@ _META_KEYS = {
 # the sections with one entry per name
 _META_NAMED = {"waterlines", "buttocks", "diagonals", "patches"}
 _META_ENTRY_KEYS = {
-    "waterlines": {"height", "row"},
+    "waterlines": {"height", "dy", "row"},
     "diagonals": {"row", "from", "through"},
 }
+
+
+def _diagonal_point(point, dwl):
+    """``(x, y)`` of a point of a diagonal of the meta data file: the list
+    ``[x, y]`` (y above the base line) or the table ``{ x = N, dy = N }`` (``x``
+    default 0, ``dy`` above ``dwl``)."""
+    if isinstance(point, dict):
+        return float(point.get("x", 0.0)), dwl + float(point["dy"])
+    return float(point[0]), float(point[1])
 
 
 def find_meta(csv_path: str):
@@ -294,6 +303,9 @@ def load_meta(path: str) -> dict:
     policy = meta.get("table", {}).get("multi_value", "error")
     if policy not in MULTI_VALUE_POLICIES:
         raise bad("unknown multi_value policy %r" % (policy,))
+    dwl = meta.get("table", {}).get("dwl")
+    if dwl is not None and not number(dwl):
+        raise bad("[table] dwl must be a number")
     stations = meta.get("stations", {})
     if "stations" in meta:
         for key in ("origin", "spacing"):
@@ -392,16 +404,35 @@ def load_meta(path: str) -> dict:
                     "unknown key %r in %s %r" % (sorted(unknown)[0], section, name)
                 )
     for name, entry in meta.get("waterlines", {}).items():
-        if not number(entry.get("height")):
-            raise bad("waterline %r needs a number height" % name)
+        if ("height" in entry) == ("dy" in entry):
+            raise bad("waterline %r needs either height = N or dy = N" % name)
+        if not number(entry.get("height", entry.get("dy"))):
+            raise bad("waterline %r: height or dy must be a number" % name)
+        if "dy" in entry and "dwl" not in meta.get("table", {}):
+            raise bad("waterline %r has dy, which needs dwl in [table]" % name)
     for name, entry in meta.get("diagonals", {}).items():
         for key in ("from", "through"):
             point = entry.get(key)
-            if not (
+            if isinstance(point, dict):
+                if set(point) - {"x", "dy"} or not number(point.get("dy")):
+                    raise bad(
+                        "diagonal %r: %s must be [x, y] or { x = N, dy = N }"
+                        % (name, key)
+                    )
+                if "x" in point and not number(point["x"]):
+                    raise bad("diagonal %r: %s x must be a number" % (name, key))
+                if "dwl" not in meta.get("table", {}):
+                    raise bad(
+                        "diagonal %r: %s has dy, which needs dwl in [table]"
+                        % (name, key)
+                    )
+            elif not (
                 isinstance(point, list) and len(point) == 2 and all(map(number, point))
             ):
-                raise bad("diagonal %r: %s must be [x, y]" % (name, key))
-        if entry["from"][0] != 0:
+                raise bad(
+                    "diagonal %r: %s must be [x, y] or { x = N, dy = N }" % (name, key)
+                )
+        if _diagonal_point(entry["from"], 0.0)[0] != 0:
             raise bad("diagonal %r: from must be on the centerline [0, y0]" % name)
     for row, items in meta.get("patches", {}).items():
         if not (
@@ -717,6 +748,13 @@ class Model:
     def bow_station(self):
         """The station set by ``set_bow_station`` (None if not set)."""
         return self._bow_station
+
+    def dwl(self):
+        """The height of the design waterline above the base line, in the unit
+        of the table: ``dwl`` of ``[table]`` of the meta data file (None if
+        not given)."""
+        value = self._meta.get("table", {}).get("dwl")
+        return None if value is None else float(value)
 
     def set_under_waterline(self, d: dict):
         """Set the offsets to be negated, as ``{line_name: [station, ...]}``.
@@ -1129,9 +1167,13 @@ class Model:
 
     def waterlines_positions(self):
         """(virtual) Return a dictionary: ``{name: height}``. From
-        ``[waterlines]`` of the meta data file, if any."""
+        ``[waterlines]`` of the meta data file, if any: ``{ height }`` above the
+        base line, or ``{ dy }`` above ``dwl`` of ``[table]``."""
         if "waterlines" in self._meta:
-            return {k: float(v["height"]) for k, v in self._meta["waterlines"].items()}
+            return {
+                k: float(v["height"] if "height" in v else self.dwl() + v["dy"])
+                for k, v in self._meta["waterlines"].items()
+            }
         print("TODO: please define waterline_positions()")
         return {}
 
@@ -1140,12 +1182,16 @@ class Model:
         the unit of the model, heights above the base line. A diagonal is the straight line
         from the point ``(0, y0)`` on the centerline through the point
         ``(x1, y1)``; the table gives, per station, the distance along it from
-        ``(0, y0)`` to the hull. From ``[diagonals]`` of the meta data file;
-        the default is no diagonals."""
-        return {
-            name: (float(d["from"][1]), float(d["through"][0]), float(d["through"][1]))
-            for name, d in self._meta.get("diagonals", {}).items()
-        }
+        ``(0, y0)`` to the hull. From ``[diagonals]`` of the meta data file, the
+        points ``[x, y]`` or ``{ x = N, dy = N }`` (``dy`` above ``dwl`` of
+        ``[table]``); the default is no diagonals."""
+        dwl = self.dwl() or 0.0
+        result = {}
+        for name, d in self._meta.get("diagonals", {}).items():
+            y0 = _diagonal_point(d["from"], dwl)[1]
+            x1, y1 = _diagonal_point(d["through"], dwl)
+            result[name] = (y0, x1, y1)
+        return result
 
     def diagonal_row(self, name: str) -> str:
         """(virtual) The name of the table row with the distances of the
