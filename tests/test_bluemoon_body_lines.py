@@ -25,8 +25,9 @@ class Test_BlueMoonBodyLines(unittest.TestCase):
 
     def test_body_lines_per_station(self):
         lines = self.project.body_lines("max_breadth", "half")
+        # F is the forward end, the table has its sheer only
         self.assertEqual(
-            ["1", "2", "3", "4", "5", "6", "7", "8", "TRAN."], list(lines.keys())
+            ["F", "1", "2", "3", "4", "5", "6", "7", "8", "TRAN."], list(lines.keys())
         )
         for station, polys in lines.items():
             (poly,) = polys
@@ -39,12 +40,12 @@ class Test_BlueMoonBodyLines(unittest.TestCase):
         default = self.project.body_lines()
         self.assertEqual(default, self.project.body_lines("max_breadth", "split"))
         self.assertEqual(
-            [1] * 8 + [2], sorted(len(polys) for polys in default.values())
+            [1] * 9 + [2], sorted(len(polys) for polys in default.values())
         )
 
     def test_station_5_sheer_point(self):
         (poly,) = self.project.body_lines("raw")["5"]
-        # SHEER breadth 4-4-0 == 52.0; LWL to SHEER 2-0-3 + LWL above base 4-1-7
+        # SHEER breadth 4-4-0 == 52.0; LWL to SHEER 2-0-3 + LWL above base
         top = poly[0]
         self.assertEqual(52.0, top[0])
         self.assertEqual(
@@ -76,7 +77,7 @@ class Test_BlueMoonBodyLines(unittest.TestCase):
             red = [e for e in doc.modelspace() if e.dxf.layer == "red"]
             # one polyline per station, the sheer, rabbet and keel lines of each
             # side
-            self.assertEqual(9 + 2 + 2 + 2, len(red))
+            self.assertEqual(10 + 2 + 2 + 2, len(red))
             # the drawing is symmetric about the centerline x = 0
             xs = [p[0] for e in red for p in e.points()]
             self.assertAlmostEqual(max(xs), -min(xs))

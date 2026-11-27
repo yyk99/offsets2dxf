@@ -32,7 +32,7 @@ class ProjectBlueMoon(table_of_offsets.Model):
             ),
             unit="ftin",
         )
-        self._y_lwl = 4 * 12 + 1 + 7.0 / 8.0  # 4-1-7
+        self._y_lwl = 49.0  # the LWL above the base line, as in the meta file
 
     def base_offset(self, line_name: str):
         """(virtual) Returns the vertical offset for the given line"""
