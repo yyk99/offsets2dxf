@@ -26,6 +26,7 @@ Classes:
 """
 
 import argparse
+import collections
 import copy
 import math
 import os
@@ -223,6 +224,11 @@ EXTRA_POINT_LAYER = "extra_points"
 # the extensions of a meta data file ("meta" and "grid" are synonyms)
 META_EXTENSIONS = (".meta", ".grid")
 
+# the keys of a patch of a cell of the table, see ``[patches]``
+_PATCH_KEYS = {"station", "value", "was", "note"}
+
+Patch = collections.namedtuple("Patch", "row station was value note")
+
 # the sections of a meta data file and the keys of the plain ones
 _META_KEYS = {
     "table": {"csv", "unit", "bow_station", "multi_value"},
@@ -234,7 +240,7 @@ _META_KEYS = {
     "sheet": {"y_origins", "vertical_borders"},
 }
 # the sections with one entry per name
-_META_NAMED = {"waterlines", "buttocks", "diagonals"}
+_META_NAMED = {"waterlines", "buttocks", "diagonals", "patches"}
 _META_ENTRY_KEYS = {
     "waterlines": {"height", "row"},
     "diagonals": {"row", "from", "through"},
@@ -256,7 +262,8 @@ def load_meta(path: str) -> dict:
     """Read and check a meta data file (TOML, see
     ``sample_data/offset_table.meta``) that describes the grid of a model:
     ``[table]``, ``[stations]``, ``[waterlines]``, ``[buttocks]``,
-    ``[diagonals]``, ``[keel]``, ``[rabbet]``, ``[ghost_line]`` and ``[sheet]``.
+    ``[diagonals]``, ``[keel]``, ``[rabbet]``, ``[ghost_line]``, ``[sheet]`` and
+    ``[patches]`` (corrections of cells of the table, see ``Model.patches``).
     Lengths are in the unit of the table (``[table] unit``; inches for
     ``ftin``), they are not converted.
     Raises ValueError for an unknown section or key or a malformed value."""
@@ -396,6 +403,25 @@ def load_meta(path: str) -> dict:
                 raise bad("diagonal %r: %s must be [x, y]" % (name, key))
         if entry["from"][0] != 0:
             raise bad("diagonal %r: from must be on the centerline [0, y0]" % name)
+    for row, items in meta.get("patches", {}).items():
+        if not (
+            isinstance(items, list)
+            and items
+            and all(isinstance(p, dict) for p in items)
+        ):
+            raise bad("[patches] %r must be a list of { station, value, ... }" % row)
+        for p in items:
+            if (
+                set(p) - _PATCH_KEYS
+                or not isinstance(p.get("station"), str)
+                or not (isinstance(p.get("value"), str) or number(p.get("value")))
+                or not isinstance(p.get("was", ""), str)
+                or not isinstance(p.get("note", ""), str)
+            ):
+                raise bad(
+                    '[patches] %r: each patch is { station = "..", value = "..", '
+                    'was = ".." (optional), note = ".." (optional) }' % row
+                )
     ghost = meta.get("ghost_line")
     if ghost is not None and not (
         isinstance(ghost.get("row"), str) and number(ghost.get("height"))
@@ -410,6 +436,16 @@ def load_meta(path: str) -> dict:
     if "vertical_borders" in sheet and len(sheet["vertical_borders"]) != 2:
         raise bad("[sheet] vertical_borders must be [bottom, top]")
     return meta
+
+
+DiagonalCheck = collections.namedtuple(
+    "DiagonalCheck", "row station table hull difference suspect"
+)
+DiagonalCheck.__doc__ = """One value of a diagonal row checked against the hull
+(``Model.check_diagonals``): ``table`` is the cell, ``hull`` the distance along
+the diagonal at which it crosses the hull made of the other points of the
+station (``None``: it does not cross), ``difference`` = ``table - hull``,
+``suspect`` is true if the difference is more than the tolerance."""
 
 
 class DiagonalPoint:
@@ -540,6 +576,8 @@ class Model:
         # read the cells as text: they are converted by offset_to_length
         self._too = pandas.read_csv(self._filename_csv, dtype=str)
         self._under_waterline = {}
+        self._patches = []
+        self._apply_patches()
         self._resolve_straight_lines()
         # x of the centerline of the body plan lofted last (loft_body_lines)
         self.body_plan_centerline_x = None
@@ -547,6 +585,63 @@ class Model:
         if "bow_station" in meta_table:
             self.set_bow_station(meta_table["bow_station"])
         self._output_unit = None
+
+    def _apply_patches(self):
+        """Replace the cells of the table named by ``[patches]`` of the meta
+        data file, e.g. to correct a misprint of the book without changing the
+        CSV file::
+
+            [patches]
+            "D. LOWER" = [
+              { station = "6", value = "1-8-6", was = "2-2-4", note = "misprint" },
+            ]
+
+        ``value`` is written like a cell of the table. ``was``, if given, must
+        be the cell of the CSV file (empty: ``""``), so that a patch of a table
+        that has changed fails instead of patching another value. ``note`` is
+        the reason. ValueError for an unknown row (or one that is more than
+        once in the table) or station, a ``was`` that is not the cell, a
+        ``value`` that is not a valid cell, or two patches of one cell."""
+        names = [c for c in self._too.columns if c != "#"]
+        done = set()
+        for row_name, items in self._meta.get("patches", {}).items():
+            rows = self._too.index[self._too["#"] == row_name]
+            if len(rows) != 1:
+                raise ValueError(
+                    "[patches]: the row %r is %s in the table"
+                    % (row_name, "not" if len(rows) == 0 else "more than once")
+                )
+            row = rows[0]
+            for p in items:
+                station = p["station"]
+                what = "[patches] row %r, station %r" % (row_name, station)
+                if station not in names:
+                    raise ValueError("%s: no such station" % what)
+                if (row_name, station) in done:
+                    raise ValueError("%s: patched twice" % what)
+                done.add((row_name, station))
+                cell = self._too.loc[row, station]
+                cell = "" if type(cell) is not str else cell.strip()
+                value = p["value"] if isinstance(p["value"], str) else repr(p["value"])
+                if "was" in p and p["was"] != cell:
+                    raise ValueError(
+                        "%s: was %r, but the table has %r" % (what, p["was"], cell)
+                    )
+                if value != STRAIGHT_LINE_MARKER:
+                    try:
+                        self.offset_to_length(value)
+                    except Exception as e:
+                        raise ValueError("%s: bad value %r (%s)" % (what, value, e))
+                self._too.loc[row, station] = value
+                self._patches.append(
+                    Patch(row_name, station, cell, value, p.get("note", ""))
+                )
+
+    def patches(self) -> list:
+        """The corrections of the table made by ``[patches]`` of the meta data
+        file: ``[Patch(row, station, was, value, note), ...]``; ``was`` is
+        the cell of the CSV file."""
+        return list(self._patches)
 
     def _resolve_straight_lines(self):
         """Replace the cells ``STRAIGHT_LINE_MARKER`` with the values on the
@@ -1938,11 +2033,28 @@ class Model:
                 segments[name].append(((centerline_x, y0), (centerline_x - x1, y1)))
         return segments
 
+    def diagonal_plan_from_centerline(self) -> bool:
+        """(virtual) How the table cell of a diagonal is drawn in the plan
+        view. ``False`` (default): the cell is the distance along the diagonal
+        line of the body plan, the plan view has the half-breadth of the hull
+        point. ``True``: the cell itself is the distance from the centerline of
+        the plan view."""
+        return False
+
+    def diagonal_plan_breadth(self, point: "DiagonalPoint", breadth: float) -> float:
+        """The distance from the plan centerline at which the diagonal hull
+        point of the body plan with the half-breadth ``breadth`` is drawn
+        in the plan view (see ``diagonal_plan_from_centerline``)."""
+        if self.diagonal_plan_from_centerline():
+            return breadth / point._ux
+        return breadth
+
     def loft_diagonal_plan_lines(self, origin_y: float = None):
         """The diagonals in the plan view: ``{name: polyline}``, one point per
         station that has the diagonal in the table. x is the station position;
         the half-breadth of the hull point of the diagonal (see
-        ``DiagonalPoint``) is drawn *below* the centerline of the plan view,
+        ``DiagonalPoint``; with ``diagonal_plan_from_centerline`` the table cell)
+        is drawn *below* the centerline of the plan view,
         i.e. y = ``origin_y`` - half-breadth, opposite to the waterlines and
         the sheer, which are above it.
 
@@ -1958,7 +2070,10 @@ class Model:
         for point in self.diagonal_body_points():
             points = self._station_points(positions, [point])
             poly = [
-                (positions[s], origin_y - points[s][0])
+                (
+                    positions[s],
+                    origin_y - self.diagonal_plan_breadth(point, points[s][0]),
+                )
                 for s in positions
                 if s in points
             ]
@@ -1986,6 +2101,101 @@ class Model:
             for name, (y0, x1, y1) in self.diagonals_positions().items()
             if self.diagonal_row(name) in rows
         ]
+
+    def check_diagonals(self, body_points: list, tolerance: float = None) -> list:
+        """Check the diagonal rows of the table against the hull.
+
+        The cell of a diagonal is the distance along the diagonal line of the
+        body plan (see ``DiagonalPoint``). The hull of a station is the polyline
+        through its other points: the ``body_points`` (the diagonals in them
+        are ignored) and the waterlines of the table. For every diagonal cell
+        the distance at which the diagonal line crosses that polyline is found
+        (the crossing nearest to the cell); a cell that differs by more than
+        ``tolerance`` is ``suspect``: a misprint of the table, or an error of
+        the other rows of the station.
+
+        The hull is a polyline between the points of the table, so it cuts the
+        corners of the curved sections and the cells are usually a little
+        greater than the crossing; ``tolerance`` is in the unit of the model,
+        the default is 3 inches.
+
+        Returns ``[DiagonalCheck, ...]`` in the order of the diagonals and
+        the stations (see ``diagonal_check_report``).
+        """
+        if tolerance is None:
+            tolerance = self.inches(3.0)
+        hull_points = [
+            p for p in body_points if not isinstance(p, DiagonalPoint)
+        ] + self.waterline_body_points()
+        positions = self.station_positions()
+        checks = []
+        for diagonal in self.diagonal_body_points():
+            cells = self._station_points(positions, [diagonal])
+            for station in positions:
+                if station not in cells:
+                    continue
+                table = cells[station][0] / diagonal._ux
+                hull_line = self._body_point_sources(station, hull_points, True)
+                hull_line.sort(key=lambda pt: -pt[1])
+                crossings = self._diagonal_crossings(
+                    diagonal, [(x, y) for x, y, _, _ in hull_line]
+                )
+                if crossings:
+                    hull = min(crossings, key=lambda t: abs(t - table))
+                    difference = table - hull
+                    suspect = abs(difference) > tolerance
+                else:
+                    hull, difference, suspect = None, None, True
+                checks.append(
+                    DiagonalCheck(
+                        diagonal.row, station, table, hull, difference, suspect
+                    )
+                )
+        return checks
+
+    @staticmethod
+    def _diagonal_crossings(diagonal: "DiagonalPoint", polyline: list) -> list:
+        """The distances along ``diagonal`` (from its first point) at which it
+        crosses ``polyline``"""
+        crossings = []
+        for (x0, y0), (x1, y1) in zip(polyline, polyline[1:]):
+            dx, dy = x1 - x0, y1 - y0
+            denominator = diagonal._uy * dx - diagonal._ux * dy
+            if abs(denominator) < 1e-12:
+                continue  # parallel
+            t = (dx * (y0 - diagonal.y0) - dy * x0) / denominator
+            s = (diagonal._ux * (y0 - diagonal.y0) - diagonal._uy * x0) / denominator
+            if t > 0 and -1e-9 <= s <= 1 + 1e-9:
+                crossings.append(t)
+        return crossings
+
+    def diagonal_check_report(self, checks: list) -> str:
+        """The text of ``check_diagonals``: a line per value, the suspect ones
+        marked with ``<-- SUSPECT``, the patched cells (see ``patches``) with
+        the cell of the CSV file"""
+        patched = {(p.row, p.station): p for p in self._patches}
+        lines = []
+        for c in checks:
+            hull = "no crossing" if c.hull is None else self.format_length(c.hull)
+            diff = "" if c.difference is None else " (%+.2f)" % c.difference
+            patch = patched.get((c.row, c.station))
+            lines.append(
+                "%-12s station %-5s table %-12s hull %s%s%s%s"
+                % (
+                    c.row,
+                    c.station,
+                    self.format_length(c.table),
+                    hull,
+                    diff,
+                    "  <-- SUSPECT" if c.suspect else "",
+                    (
+                        "  (patched, the CSV has %s)" % (patch.was or "nothing")
+                        if patch
+                        else ""
+                    ),
+                )
+            )
+        return "\n".join(lines)
 
     def second_offset_at(self, station_id: str, line_id: str):
         """The second value of a cell ``offset1 and offset2`` of the row

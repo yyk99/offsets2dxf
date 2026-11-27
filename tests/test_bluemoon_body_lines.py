@@ -54,6 +54,47 @@ class Test_BlueMoonBodyLines(unittest.TestCase):
             top[1],
         )
 
+    def test_diagonal_plan_lines_are_the_table_cells(self):
+        # in the plan view the diagonal is drawn as the table says: D. LOWER at
+        # the station 6 is 1-8-6 (the patch of the misprint 2-2-4) from the
+        # centerline
+        origin_y = self.project.plan_centerline_y()
+        lines = self.project.loft_diagonal_plan_lines()
+        x6 = self.project.station_positions()["6"]
+        d1 = dict(lines["D1"])
+        self.assertAlmostEqual(
+            table_of_offsets.TableOfOffsets.offset2double("1-8-6"),
+            origin_y - d1[x6],
+        )
+
+    def test_patch_of_the_misprint(self):
+        # D. LOWER at the station 6 is 2-2-4 in the book, a misprint; the CSV
+        # keeps it, the meta file patches it (1-8-6)
+        (patch,) = self.project.patches()
+        self.assertEqual(("D. LOWER", "6", "2-2-4", "1-8-6"), patch[:4])
+        offset = table_of_offsets.TableOfOffsets.offset2double
+        checks = self.project.check_diagonals(self.project.body_points())
+        self.assertEqual(14, len(checks))
+        self.assertEqual([], [c for c in checks if c.suspect])
+        (c6,) = [c for c in checks if (c.row, c.station) == ("D. LOWER", "6")]
+        self.assertEqual(offset("1-8-6"), c6.table)
+        self.assertIn(
+            "patched, the CSV has 2-2-4", self.project.diagonal_check_report(checks)
+        )
+
+    def test_check_diagonals_finds_the_misprint(self):
+        # the cell of the book: the hull made of the other rows crosses the
+        # diagonal at about 20.8
+        offset = table_of_offsets.TableOfOffsets.offset2double
+        row = self.project.line_to_index("D. LOWER")
+        self.project._too.loc[row, "6"] = "2-2-4"
+        checks = self.project.check_diagonals(self.project.body_points())
+        (suspect,) = [c for c in checks if c.suspect]
+        self.assertEqual(("D. LOWER", "6"), (suspect.row, suspect.station))
+        self.assertEqual(offset("2-2-4"), suspect.table)
+        self.assertAlmostEqual(20.8, suspect.hull, delta=0.5)
+        self.assertIn("SUSPECT", self.project.diagonal_check_report(checks))
+
     def test_both_sides(self):
         half = self.project.body_lines("raw")
         both = self.project.body_lines("raw", "both")

@@ -11,7 +11,10 @@ Run: ``python3 projectbluemoon.py [--out-dir DIR] [--output-units UNIT]`` writes
 current directory) or DIR, tutorial_project_blue_moon.dxf (everything, body lines in
 the middle of the profile view), tutorial_project_blue_moon_body_right.dxf (body
 plan to the right of the profile view), tutorial_project_blue_moon_body_split.dxf
-(aft/forward halves) and tutorial_project_blue_moon_body.dxf (body lines only).
+(aft/forward halves), tutorial_project_blue_moon_body.dxf (body lines only),
+tutorial_project_blue_moon_station6.dxf (the body line of the station 6 with every
+point labelled) and tutorial_project_blue_moon_diagonals.dxf (the plan view with the
+diagonals, their hull points labelled with the table values).
 """
 
 import context
@@ -83,18 +86,20 @@ class ProjectBlueMoon(table_of_offsets.Model):
         """The diagonals reach 6" beyond the farthest hull point"""
         return 6.0
 
+    def diagonal_plan_from_centerline(self):
+        """In the plan view a diagonal is drawn at the distance from the
+        centerline given by the table cell (D. LOWER at the station 6 is
+        2-2-4 from the centerline)"""
+        return True
+
     def keel_body_point(self):
         return ("KEEL", "KEEL TO BASE")
 
-    def body_lines(
-        self,
-        placement: str = "max_breadth",
-        sides: str = None,
-        bow_station: str = None,
-    ):
-        """Return {station: polyline} with the body plan line of every station"""
-        # (breadth, height) pairs. A string is a table row, a number is inches.
-        body_points = [
+    def body_points(self):
+        """The (breadth, height) points of a body line, without the waterlines
+        (``loft_body_lines`` adds them). A string is a table row, a number is
+        inches."""
+        return [
             ("SHEER", "LWL to SHEER"),
             ("RABBET", "RABBET TO BASE"),
             ("KEEL", "KEEL TO BASE"),
@@ -105,9 +110,53 @@ class ProjectBlueMoon(table_of_offsets.Model):
             (24.0, "BASE TO B-2"),
             (12.0, "BASE TO B-1"),
         ]
+
+    def body_lines(
+        self,
+        placement: str = "max_breadth",
+        sides: str = None,
+        bow_station: str = None,
+    ):
+        """Return {station: polyline} with the body plan line of every station"""
         return self.loft_body_lines(
-            body_points, placement, sides=sides, bow_station=bow_station
+            self.body_points(), placement, sides=sides, bow_station=bow_station
         )
+
+    def save_station_as(self, filename_dxf: str, station: str = "6"):
+        """Save the body line of one station for checking the data: every point
+        is labelled with the table rows its coordinates come from."""
+        with self.open_dxf(filename_dxf) as dxf:
+            self.plot_annotated_body_line(
+                dxf, station, self.body_points(), point_text_height=1.0
+            )
+
+    def save_diagonals_as(self, filename_dxf: str):
+        """Save the plan view with the diagonals for checking: the grid, the
+        sheer and the waterlines, the diagonals (below the plan centerline) and
+        every hull point of a diagonal marked with a circle and labelled
+        ``station: row, the table cell`` (the distance from the plan centerline)."""
+        with self.open_dxf(filename_dxf) as dxf:
+            self.plot_grid(dxf)
+            # the half-breadths: the sheer and the waterlines
+            for n in range(9, 15):
+                dxf.add_red_polyline(self.loft_line_n(n))
+            self.plot_diagonal_plan_lines(dxf)
+
+            origin_y = self.plan_centerline_y()
+            positions = self.station_positions()
+            for point in self.diagonal_body_points():
+                points = self._station_points(positions, [point])
+                for station, (breadth, _) in points.items():
+                    distance = self.diagonal_plan_breadth(point, breadth)
+                    x, y = positions[station], origin_y - distance
+                    dxf.add_circle((x, y), self.inches(0.75), "extra_points")
+                    dxf.text(
+                        (x + self.inches(1), y - self.inches(2)),
+                        "%s: %s %s"
+                        % (station, point.row, self.format_length(distance)),
+                        height=self.inches(1.0),
+                        layer="extra_points",
+                    )
 
     def save_body_lines_as(
         self, filename_dxf: str, placement: str = "max_breadth", sides: str = None
@@ -218,5 +267,13 @@ if __name__ == "__main__":
     )
     proj.save_body_lines_as(out("tutorial_project_blue_moon_body.dxf"))
     print("Saved as:", out("tutorial_project_blue_moon_body.dxf"))
+    # one station, every point labelled with the source of its coordinates
+    proj.save_station_as(out("tutorial_project_blue_moon_station6.dxf"), "6")
+    print("Saved as:", out("tutorial_project_blue_moon_station6.dxf"))
+    # the diagonal rows against the hull: the misprints of the table
+    print(proj.diagonal_check_report(proj.check_diagonals(proj.body_points())))
+    # the diagonals and their hull points, labelled with the table values
+    proj.save_diagonals_as(out("tutorial_project_blue_moon_diagonals.dxf"))
+    print("Saved as:", out("tutorial_project_blue_moon_diagonals.dxf"))
 
 # end of file
