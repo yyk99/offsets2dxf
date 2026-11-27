@@ -84,7 +84,7 @@ class Test_BlueMoonBodyLines(unittest.TestCase):
 
     def test_check_diagonals_finds_the_misprint(self):
         # the cell of the book: the hull made of the other rows crosses the
-        # diagonal at about 20.8
+        # diagonal at about 21.6 (20.8 with dwl = 49.0)
         offset = table_of_offsets.TableOfOffsets.offset2double
         row = self.project.line_to_index("D. LOWER")
         self.project._too.loc[row, "6"] = "2-2-4"
@@ -92,7 +92,7 @@ class Test_BlueMoonBodyLines(unittest.TestCase):
         (suspect,) = [c for c in checks if c.suspect]
         self.assertEqual(("D. LOWER", "6"), (suspect.row, suspect.station))
         self.assertEqual(offset("2-2-4"), suspect.table)
-        self.assertAlmostEqual(20.8, suspect.hull, delta=0.5)
+        self.assertAlmostEqual(21.6, suspect.hull, delta=0.5)
         self.assertIn("SUSPECT", self.project.diagonal_check_report(checks))
 
     def test_both_sides(self):
