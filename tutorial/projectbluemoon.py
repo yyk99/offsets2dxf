@@ -141,6 +141,7 @@ class ProjectBlueMoon(table_of_offsets.Model):
             # the half-breadths: the sheer and the waterlines
             for n in range(9, 15):
                 dxf.add_red_polyline(self.loft_line_n(n))
+            self.plot_waterline_plan_labels(dxf)
             self.plot_diagonal_plan_lines(dxf)
 
             origin_y = self.plan_centerline_y()
@@ -203,6 +204,7 @@ class ProjectBlueMoon(table_of_offsets.Model):
             dxf.add_red_polyline(self.loft_line_n(12))
             dxf.add_red_polyline(self.loft_line_n(13))
             dxf.add_red_polyline(self.loft_line_n(14))
+            self.plot_waterline_plan_labels(dxf)
 
             # the keel and the rabbet, in the profile and plan views, as the
             # grid file gives them ([keel], [rabbet]), with the extra points

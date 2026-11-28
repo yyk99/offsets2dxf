@@ -130,6 +130,38 @@ class Test_BlueMoonBodyLines(unittest.TestCase):
             self.project.save_model_as(out, body_placement="right", body_sides="split")
             doc = ezdxf.readfile(out)
             self.assertGreater(len(list(doc.modelspace())), 50)
+            # the waterlines are named where the profile view ends
+            end = max(self.project.station_positions().values()) + self.project.inches(
+                13
+            )
+            texts = {
+                t.dxf.text
+                for t in doc.modelspace().query("TEXT")
+                if abs(t.dxf.insert.x - end) < 1e-6
+            }
+            self.assertTrue(set(self.project.waterlines_positions()) <= texts)
+
+    def test_waterline_plan_labels(self):
+        """Every waterline line of the plan view is labelled just beyond its
+        end with the greatest x"""
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "blue_moon.dxf")
+            self.project.save_model_as(out)
+            doc = ezdxf.readfile(out)
+        plan_y = self.project.plan_centerline_y()
+        texts = [
+            (t.dxf.text, t.dxf.insert.x, t.dxf.insert.y)
+            for t in doc.modelspace().query("TEXT")
+            if t.dxf.insert.y < plan_y + 20
+        ]
+        for name in self.project.waterlines_positions():
+            poly = self.project.loft_line_n_sorted(self.project.line_to_index(name))
+            x, y = poly[-1]
+            self.assertIn(
+                (name, x + self.project.inches(1), y),
+                [(n, round(tx, 6), round(ty, 6)) for n, tx, ty in texts],
+                name,
+            )
 
 
 if __name__ == "__main__":

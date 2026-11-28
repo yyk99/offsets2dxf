@@ -1293,7 +1293,8 @@ class Model:
         ``profile_end_x`` - extend the base line (the first of
         ``grid_y_origins``) and the waterlines, with their right labels, to
         this x, e.g. to run through a body plan placed to the right of the
-        profile view. Ignored if it is not beyond the last station.
+        profile view; the waterlines are named at the end of the profile view
+        too. Ignored if it is not beyond the last station.
 
         ``body_centerline`` - ``(x, bottom_y, top_y)``: draw the vertical
         centerline of a body plan there. See ``body_plan_grid_options``.
@@ -1357,6 +1358,10 @@ class Model:
             dxf.add_grid_polyline([(min(xx) - inch(12), wl_y), (wl_right, wl_y)])
             dxf.text((min(xx) - inch(12) + inch(1), wl_y + inch(1)), wl)
             dxf.text((wl_right - inch(1), wl_y + inch(1)), wl)
+            if wl_right > max(xx) + inch(12):
+                # the line runs on through a body plan: name it where the
+                # profile view ends too
+                dxf.text((max(xx) + inch(13), wl_y + inch(1)), wl)
 
         # buttocks
         buttocks_origin = 0
@@ -1370,6 +1375,21 @@ class Model:
             )
             dxf.text((min(xx) - inch(12) + inch(1), wl_y + inch(1)), wl)
             dxf.text((max(xx) + inch(12) - inch(1), wl_y + inch(1)), wl)
+
+    def plot_waterline_plan_labels(self, dxf: object):
+        """Label the waterline lines of the plan view with the name of the
+        waterline: a text just beyond the end of each line with the greatest x
+        (the lines are those of ``loft_line_n`` of ``waterline_row(name)``;
+        waterlines without a row in the table are skipped)."""
+        names = list(self._too["#"])
+        for name in self.waterlines_positions():
+            row = self.waterline_row(name)
+            if row not in names:
+                continue
+            poly = self.loft_line_n_sorted(self.line_to_index(row))
+            if poly:
+                x, y = poly[-1]
+                dxf.text((x + self.inches(1), y), name)
 
     def drawing_area_vertical_borders(self):
         """(virtual) return (bottom, top); ``vertical_borders`` of ``[sheet]``
