@@ -36,7 +36,7 @@ class ProjectBlueMoon(table_of_offsets.Model):
             unit="ftin",
         )
         # the one variable of the data: the height of the LWL above the base line
-        self._y_lwl = self.waterlines_positions()["LWL"]
+        self._y_lwl = self.dwl()
 
     def base_offset(self, line_name: str):
         """(virtual) Returns the vertical offset for the given line"""
@@ -59,29 +59,23 @@ class ProjectBlueMoon(table_of_offsets.Model):
 
         return 0
 
-    # 0         LWL to SHEER
-    # 1      LWL to DECK EDG
-    # 2          BASE TO B-3
-    # 3          BASE TO B-2
-    # 4          BASE TO B-1
-    # 5       RABBET TO BASE
-    # 6         KEEL TO BASE
-    # 7     CENTERLINE SHAFT
-    # 8     BASE TO TOP BAL.
+    # the rows of the table the profile and plan views draw, by name
+    PROFILE_ROWS = [
+        "LWL to SHEER",
+        "LWL to DECK EDG",
+        "BASE TO B-3",
+        "BASE TO B-2",
+        "BASE TO B-1",
+        # RABBET TO BASE and KEEL TO BASE are drawn by plot_keel_and_rabbet
+        "CENTERLINE SHAFT",
+        "BASE TO TOP BAL.",
+    ]
+    PLAN_ROWS = ["SHEER", "WL 2A", "WL 1A", "LWL", "WL 1B", "WL 2B"]
 
-    # 9                SHEER
-    # 10               WL 2A
-    # 11               WL 1A
-    # 12                 LWL
-    # 13               WL 1B
-    # 14               WL 2B
-    # 15              RABBET
-    # 16                KEEL
-    # 17         BALLAST TOP
-    # 18            D. UPPER
-    # 19            D. LOWER
-
-    # {'LWL to SHEER': 0, 'LWL to DECK EDG': 1, 'BASE TO B-3': 2, 'BASE TO B-2': 3, 'BASE TO B-1': 4, 'RABBET TO BASE': 5, 'KEEL TO BASE': 6, 'CENTERLINE SHAFT': 7, 'BASE TO TOP BAL.': 8, 'SHEER': 9, 'WL 2A': 10, 'WL 1A': 11, 'LWL': 12, 'WL 1B': 13, 'WL 2B': 14, 'RABBET': 15, 'KEEL': 16, 'BALLAST TOP': 17, 'D. UPPER': 18, 'D. LOWER': 19, nan: 20, 'RED-CORRECTED': 21}
+    def plot_rows(self, dxf, rows):
+        """Draw the lines of the table rows named in ``rows``"""
+        for name in rows:
+            dxf.add_red_polyline(self.loft_line_n(self.line_to_index(name)))
 
     def diagonal_extension(self):
         """The diagonals reach 6" beyond the farthest hull point"""
@@ -89,8 +83,7 @@ class ProjectBlueMoon(table_of_offsets.Model):
 
     def diagonal_plan_from_centerline(self):
         """In the plan view a diagonal is drawn at the distance from the
-        centerline given by the table cell (D. LOWER at the station 6 is
-        2-2-4 from the centerline)"""
+        centerline given by the table cell"""
         return True
 
     def keel_body_point(self):
@@ -139,8 +132,9 @@ class ProjectBlueMoon(table_of_offsets.Model):
         with self.open_dxf(filename_dxf) as dxf:
             self.plot_grid(dxf)
             # the half-breadths: the sheer and the waterlines
-            for n in range(9, 15):
-                dxf.add_red_polyline(self.loft_line_n(n))
+            self.plot_rows(dxf, self.PLAN_ROWS)
+            self.plot_waterline_plan_labels(dxf)
+            self.plot_sheer_end_lines(dxf)
             self.plot_diagonal_plan_lines(dxf)
 
             origin_y = self.plan_centerline_y()
@@ -185,62 +179,24 @@ class ProjectBlueMoon(table_of_offsets.Model):
         with self.open_dxf(filename_dxf) as dxf:
             self.plot_grid(dxf, **grid_options)
 
-            dxf.add_red_polyline(self.loft_line_n(0))
-            dxf.add_red_polyline(self.loft_line_n(1))
-            dxf.add_red_polyline(self.loft_line_n(2))
-            dxf.add_red_polyline(self.loft_line_n(3))
-            dxf.add_red_polyline(self.loft_line_n(4))
-            # rows 5 and 6 (RABBET TO BASE, KEEL TO BASE) are drawn by
-            # plot_keel_and_rabbet below, with the extra points
-            dxf.add_red_polyline(self.loft_line_n(7))
-            dxf.add_red_polyline(self.loft_line_n(8))
-            #
+            self.plot_rows(dxf, self.PROFILE_ROWS)
             # now half-breadth
-            #
-            dxf.add_red_polyline(self.loft_line_n(9))
-            dxf.add_red_polyline(self.loft_line_n(10))
-            dxf.add_red_polyline(self.loft_line_n(11))
-            dxf.add_red_polyline(self.loft_line_n(12))
-            dxf.add_red_polyline(self.loft_line_n(13))
-            dxf.add_red_polyline(self.loft_line_n(14))
+            self.plot_rows(dxf, self.PLAN_ROWS)
+            self.plot_waterline_plan_labels(dxf)
 
             # the keel and the rabbet, in the profile and plan views, as the
             # grid file gives them ([keel], [rabbet]), with the extra points
             self.plot_keel_and_rabbet(dxf)
 
+            # the raked transom of [transom], if the meta file has one: the
+            # points of its column joined in the profile view
+            self.plot_transom_line(dxf)
+
+            # the ends of the sheer line of the plan view to the centerline
+            self.plot_sheer_end_lines(dxf)
+
             # the diagonals in the plan view, below the plan centerline
             self.plot_diagonal_plan_lines(dxf)
-
-            # draw a body line
-
-            # the pairs of point making a body line
-            """
-            #,1,2,3,4,5,6,7,8,TRAN.
------------------- Y -----------------------------
-LWL to SHEER,3-6-5,3-0-0,2-6-4,2-2-5,2-0-3,1-11-7,2-1-7,2-3-1,2-7-4
-LWL to DECK EDG,2-6-5,2-0-1,1-6-5,1-2-6,1-0-4,1-0-0,1-2-0,1-5-2,1-8-2
-BASE TO B-3,,,4-10-1,3-5-7,3-3-6,3-8-1,4-7-0,5-4-6,
-BASE TO B-2,,5-5-7,3-6-0,2-11-0,2-10-5,3-2-7,4-1-2,4-9-2,5-0-2
-BASE TO B-1,,3-9-3,2-8-3,2-3-7,2-4-4,2-9-0,3-8-6,4-5-5,4-7-2
-RABBET TO BASE,4-7-4,2-11-0,2-0-5,1-7-3,1-3-1,1-1-7,3-2-1,4-3-0,4-3-4
-KEEL TO BASE,4-1-7,2-4-6,1-4-2,0-9-3,0-5-2,0-2-1,1-7-3,4-1-7,
-CENTERLINE SHAFT,,,,,,3-0-4,2-9-6,,
-BASE TO TOP BAL.,,,1-8-3,1-5-4,1-2-6,0-8-3,,,
---------------------- X --------------------------
-SHEER,0-10-0,2-8-0,3-9-0,4-2-4,4-4-0,4-1-4,3-6-2,3-1-1,2-6-2
-WL 2A,0-5-0,2-0-7,3-4-7,4-1-7,4-4-2,4-1-7,3-6-6,3-1-6,2-10-1
-WL 1A,0-2-7,1-8-3,3-0-6,3-11-6,4-4-0,4-0-7,3-4-2,2-3-1,1-9-0
-LWL,,1-3-0,2-7-0,3-6-5,4-0-6,3-8-6,2-1-3,0-1-0,0-1-0
-WL 1B,,0-7-7,1-10-6,2-10-3,3-1-6,2-4-1,0-4-7,,
-WL 2B,,,0-11-4,1-6-4,1-6-4,0-10-1,0-2-4,,
-RABBET,0-2-0,0-2-2,0-2-6,0-3-0,0-3-0,0-3-0,0-3-0,0-3-0,0-3-0
-KEEL,0-0-4,0-0-4,0-1-4,0-3-0,0-3-0,0-3-0,0-1-0,0-1-0,0-1-0
-BALLAST TOP,,,0-2-0,0-3-0,0-3-0,0-3-0,,,
-D. UPPER,0-7-0,2-1-7,3-3-7,4-1-5,4-4-7,4-1-2,3-2-4,2-5-6,
-D. LOWER,,1-0-0,1-9-3,2-1-5,2-1-6,2-2-4,0-10-7,,
-,,,,,,,,,
-RED-CORRECTED,,,,,,,,,
-            """
 
             self.plot_body_lines(dxf, body_lines)
 

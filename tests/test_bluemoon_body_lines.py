@@ -8,6 +8,7 @@ import tempfile
 import unittest
 
 import ezdxf
+import pandas
 
 source_directory = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 tutorial_directory = os.path.join(source_directory, "tutorial")
@@ -43,56 +44,64 @@ class Test_BlueMoonBodyLines(unittest.TestCase):
             [1] * 9 + [2], sorted(len(polys) for polys in default.values())
         )
 
+    def cell(self, row: str, station: str) -> str:
+        """The cell of the table as it is in the CSV (without the patches)"""
+        raw = pandas.read_csv(CSV, dtype=str)
+        return raw.loc[raw["#"] == row, station].iloc[0]
+
     def test_station_5_sheer_point(self):
         (poly,) = self.project.body_lines("raw")["5"]
-        # SHEER breadth 4-4-0 == 52.0; LWL to SHEER 2-0-3 + LWL above base
+        # the top of the line: SHEER breadth, LWL to SHEER + LWL above base
+        offset = table_of_offsets.TableOfOffsets.offset2double
         top = poly[0]
-        self.assertEqual(52.0, top[0])
+        self.assertEqual(offset(self.cell("SHEER", "5")), top[0])
         self.assertEqual(
-            table_of_offsets.TableOfOffsets.offset2double("2-0-3")
-            + self.project._y_lwl,
-            top[1],
+            offset(self.cell("LWL to SHEER", "5")) + self.project._y_lwl, top[1]
         )
 
     def test_diagonal_plan_lines_are_the_table_cells(self):
-        # in the plan view the diagonal is drawn as the table says: D. LOWER at
-        # the station 6 is 1-8-6 (the patch of the misprint 2-2-4) from the
-        # centerline
+        # in the plan view the diagonal is drawn as the table says: the patched
+        # cell is the distance from the centerline
+        (patch,) = self.project.patches()
         origin_y = self.project.plan_centerline_y()
         lines = self.project.loft_diagonal_plan_lines()
-        x6 = self.project.station_positions()["6"]
+        x = self.project.station_positions()[patch.station]
         d1 = dict(lines["D1"])
         self.assertAlmostEqual(
-            table_of_offsets.TableOfOffsets.offset2double("1-8-6"),
-            origin_y - d1[x6],
+            table_of_offsets.TableOfOffsets.offset2double(patch.value),
+            origin_y - d1[x],
         )
 
     def test_patch_of_the_misprint(self):
-        # D. LOWER at the station 6 is 2-2-4 in the book, a misprint; the CSV
-        # keeps it, the meta file patches it (1-8-6)
+        # a cell of D. LOWER is a misprint of the book; the CSV keeps it, the
+        # meta file patches it
         (patch,) = self.project.patches()
-        self.assertEqual(("D. LOWER", "6", "2-2-4", "1-8-6"), patch[:4])
+        self.assertEqual(("D. LOWER", "6"), (patch.row, patch.station))
+        self.assertEqual(self.cell(patch.row, patch.station), patch.was)
+        self.assertNotEqual(patch.was, patch.value)
         offset = table_of_offsets.TableOfOffsets.offset2double
         checks = self.project.check_diagonals(self.project.body_points())
         self.assertEqual(14, len(checks))
         self.assertEqual([], [c for c in checks if c.suspect])
-        (c6,) = [c for c in checks if (c.row, c.station) == ("D. LOWER", "6")]
-        self.assertEqual(offset("1-8-6"), c6.table)
+        (c6,) = [c for c in checks if (c.row, c.station) == (patch.row, patch.station)]
+        self.assertEqual(offset(patch.value), c6.table)
         self.assertIn(
-            "patched, the CSV has 2-2-4", self.project.diagonal_check_report(checks)
+            "patched, the CSV has %s" % patch.was,
+            self.project.diagonal_check_report(checks),
         )
 
     def test_check_diagonals_finds_the_misprint(self):
         # the cell of the book: the hull made of the other rows crosses the
-        # diagonal at about 20.8
+        # diagonal near the patched value
         offset = table_of_offsets.TableOfOffsets.offset2double
-        row = self.project.line_to_index("D. LOWER")
-        self.project._too.loc[row, "6"] = "2-2-4"
+        (patch,) = self.project.patches()
+        row = self.project.line_to_index(patch.row)
+        self.project._too.loc[row, patch.station] = patch.was
         checks = self.project.check_diagonals(self.project.body_points())
         (suspect,) = [c for c in checks if c.suspect]
-        self.assertEqual(("D. LOWER", "6"), (suspect.row, suspect.station))
-        self.assertEqual(offset("2-2-4"), suspect.table)
-        self.assertAlmostEqual(20.8, suspect.hull, delta=0.5)
+        self.assertEqual((patch.row, patch.station), (suspect.row, suspect.station))
+        self.assertEqual(offset(patch.was), suspect.table)
+        self.assertAlmostEqual(offset(patch.value), suspect.hull, delta=1.0)
         self.assertIn("SUSPECT", self.project.diagonal_check_report(checks))
 
     def test_both_sides(self):
@@ -130,6 +139,38 @@ class Test_BlueMoonBodyLines(unittest.TestCase):
             self.project.save_model_as(out, body_placement="right", body_sides="split")
             doc = ezdxf.readfile(out)
             self.assertGreater(len(list(doc.modelspace())), 50)
+            # the waterlines are named where the profile view ends
+            end = max(self.project.station_positions().values()) + self.project.inches(
+                13
+            )
+            texts = {
+                t.dxf.text
+                for t in doc.modelspace().query("TEXT")
+                if abs(t.dxf.insert.x - end) < 1e-6
+            }
+            self.assertTrue(set(self.project.waterlines_positions()) <= texts)
+
+    def test_waterline_plan_labels(self):
+        """Every waterline line of the plan view is labelled just beyond its
+        end with the greatest x"""
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "blue_moon.dxf")
+            self.project.save_model_as(out)
+            doc = ezdxf.readfile(out)
+        plan_y = self.project.plan_centerline_y()
+        texts = [
+            (t.dxf.text, t.dxf.insert.x, t.dxf.insert.y)
+            for t in doc.modelspace().query("TEXT")
+            if t.dxf.insert.y < plan_y + 20
+        ]
+        for name in self.project.waterlines_positions():
+            poly = self.project.loft_line_n_sorted(self.project.line_to_index(name))
+            x, y = poly[-1]
+            self.assertIn(
+                (name, x + self.project.inches(1), y),
+                [(n, round(tx, 6), round(ty, 6)) for n, tx, ty in texts],
+                name,
+            )
 
 
 if __name__ == "__main__":

@@ -231,20 +231,30 @@ Patch = collections.namedtuple("Patch", "row station was value note")
 
 # the sections of a meta data file and the keys of the plain ones
 _META_KEYS = {
-    "table": {"csv", "unit", "bow_station", "multi_value"},
+    "table": {"csv", "unit", "bow_station", "multi_value", "dwl"},
     "stations": {"origin", "spacing", "positions"},
     "ghost_line": {"row", "height"},
     "keel": {"from", "to", "siding", "height_row", "breadth_row", "extra_points"},
     "rabbet": {"siding", "height_row", "breadth_row", "extra_points"},
     "chine": {"height_row", "breadth_row"},
     "sheet": {"y_origins", "vertical_borders"},
+    "transom": {"station", "extra_points"},
 }
 # the sections with one entry per name
 _META_NAMED = {"waterlines", "buttocks", "diagonals", "patches"}
 _META_ENTRY_KEYS = {
-    "waterlines": {"height", "row"},
+    "waterlines": {"height", "dy", "row"},
     "diagonals": {"row", "from", "through"},
 }
+
+
+def _diagonal_point(point, dwl):
+    """``(x, y)`` of a point of a diagonal of the meta data file: the list
+    ``[x, y]`` (y above the base line) or the table ``{ x = N, dy = N }`` (``x``
+    default 0, ``dy`` above ``dwl``)."""
+    if isinstance(point, dict):
+        return float(point.get("x", 0.0)), dwl + float(point["dy"])
+    return float(point[0]), float(point[1])
 
 
 def find_meta(csv_path: str):
@@ -294,6 +304,9 @@ def load_meta(path: str) -> dict:
     policy = meta.get("table", {}).get("multi_value", "error")
     if policy not in MULTI_VALUE_POLICIES:
         raise bad("unknown multi_value policy %r" % (policy,))
+    dwl = meta.get("table", {}).get("dwl")
+    if dwl is not None and not number(dwl):
+        raise bad("[table] dwl must be a number")
     stations = meta.get("stations", {})
     if "stations" in meta:
         for key in ("origin", "spacing"):
@@ -370,6 +383,24 @@ def load_meta(path: str) -> dict:
             for k in set(p) - {"station", "edge"}
         )
 
+    if "transom" in meta:
+        transom = meta["transom"]
+        points = transom.get("extra_points")
+        if not isinstance(transom.get("station"), str):
+            raise bad('[transom] station must be the name of a station, "..."')
+        if (
+            not isinstance(points, list)
+            or len(points) != 2
+            or not all(map(good_point, points))
+            or any(
+                set(p) - {"station", "dx", "dy", "height", "height_row"} for p in points
+            )
+        ):
+            raise bad(
+                "[transom] extra_points must be the two points of the transom "
+                'line: { station = "..", dx = N (optional), dy = N (optional), '
+                'height = N or height_row = ".." }'
+            )
     for section in EXTRA_POINT_SECTIONS:
         points = meta.get(section, {}).get("extra_points", [])
         if not isinstance(points, list) or not all(map(good_point, points)):
@@ -392,16 +423,35 @@ def load_meta(path: str) -> dict:
                     "unknown key %r in %s %r" % (sorted(unknown)[0], section, name)
                 )
     for name, entry in meta.get("waterlines", {}).items():
-        if not number(entry.get("height")):
-            raise bad("waterline %r needs a number height" % name)
+        if ("height" in entry) == ("dy" in entry):
+            raise bad("waterline %r needs either height = N or dy = N" % name)
+        if not number(entry.get("height", entry.get("dy"))):
+            raise bad("waterline %r: height or dy must be a number" % name)
+        if "dy" in entry and "dwl" not in meta.get("table", {}):
+            raise bad("waterline %r has dy, which needs dwl in [table]" % name)
     for name, entry in meta.get("diagonals", {}).items():
         for key in ("from", "through"):
             point = entry.get(key)
-            if not (
+            if isinstance(point, dict):
+                if set(point) - {"x", "dy"} or not number(point.get("dy")):
+                    raise bad(
+                        "diagonal %r: %s must be [x, y] or { x = N, dy = N }"
+                        % (name, key)
+                    )
+                if "x" in point and not number(point["x"]):
+                    raise bad("diagonal %r: %s x must be a number" % (name, key))
+                if "dwl" not in meta.get("table", {}):
+                    raise bad(
+                        "diagonal %r: %s has dy, which needs dwl in [table]"
+                        % (name, key)
+                    )
+            elif not (
                 isinstance(point, list) and len(point) == 2 and all(map(number, point))
             ):
-                raise bad("diagonal %r: %s must be [x, y]" % (name, key))
-        if entry["from"][0] != 0:
+                raise bad(
+                    "diagonal %r: %s must be [x, y] or { x = N, dy = N }" % (name, key)
+                )
+        if _diagonal_point(entry["from"], 0.0)[0] != 0:
             raise bad("diagonal %r: from must be on the centerline [0, y0]" % name)
     for row, items in meta.get("patches", {}).items():
         if not (
@@ -575,6 +625,11 @@ class Model:
         self._filename_csv = _filename_csv
         # read the cells as text: they are converted by offset_to_length
         self._too = pandas.read_csv(self._filename_csv, dtype=str)
+        transom_station = self._meta.get("transom", {}).get("station")
+        if transom_station is not None and transom_station not in self._too.columns:
+            raise ValueError(
+                "[transom] station %r is not a station of the table" % transom_station
+            )
         self._under_waterline = {}
         self._patches = []
         self._apply_patches()
@@ -593,7 +648,7 @@ class Model:
 
             [patches]
             "D. LOWER" = [
-              { station = "6", value = "1-8-6", was = "2-2-4", note = "misprint" },
+              { station = "6", value = "1-0-0", was = "1-3-0", note = "misprint" },
             ]
 
         ``value`` is written like a cell of the table. ``was``, if given, must
@@ -718,6 +773,13 @@ class Model:
         """The station set by ``set_bow_station`` (None if not set)."""
         return self._bow_station
 
+    def dwl(self):
+        """The height of the design waterline above the base line, in the unit
+        of the table: ``dwl`` of ``[table]`` of the meta data file (None if
+        not given)."""
+        value = self._meta.get("table", {}).get("dwl")
+        return None if value is None else float(value)
+
     def set_under_waterline(self, d: dict):
         """Set the offsets to be negated, as ``{line_name: [station, ...]}``.
         Used where a table gives positive values below the waterline."""
@@ -777,6 +839,140 @@ class Model:
         works in its own unit (``units``); the coordinates are converted when
         drawn."""
         return DXF(filename_dxf, unit=self.output_unit(), source_unit=self.units())
+
+    def sheer_end_plan_lines(self):
+        """The lines that join the two ends of the sheer line of the plan
+        view to the plan centerline: ``[[(x, y), (x, y0)], ...]``, at the
+        x of each end, from the point of the sheer to the plan centerline
+        ``y0``. The sheer is the first item of ``body_points`` (its breadth
+        row); the ends are the first and the last point of its line (the
+        order of the columns). [] without such a row, a plan view or any
+        point; an end on the centerline has no line."""
+        y0 = self.plan_centerline_y()
+        points = getattr(self, "body_points", lambda: [])()
+        if y0 is None or not points or not isinstance(points[0][0], str):
+            return []
+        line = self.loft_line_n(self.line_to_index(points[0][0]))
+        ends = [line[0], line[-1]] if len(line) > 1 else line
+        return [[(x, y), (x, y0)] for x, y in ends if y != y0]
+
+    def plot_sheer_end_lines(self, dxf: object):
+        """Draw ``sheer_end_plan_lines`` in the plan view."""
+        for line in self.sheer_end_plan_lines():
+            dxf.add_red_polyline(line)
+
+    def transom_station(self):
+        """The name of the station column of the raked transom, from
+        ``[transom]`` of the meta data file, or None."""
+        return self._meta.get("transom", {}).get("station")
+
+    def transom_line(self):
+        """The line of the raked transom in the profile view:
+        ``((x0, y0), (x1, y1))`` in the unit of the model, through the two
+        ``extra_points`` of ``[transom]`` (see ``extra_points``), or None if
+        the file has no ``[transom]``. Points at the same height are a
+        ValueError."""
+        if "transom" not in self._meta:
+            return None
+        (x0, y0, _), (x1, y1, _) = self.extra_points("transom")
+        if y0 == y1:
+            raise ValueError("[transom] the two points must be at different heights")
+        return (x0, y0), (x1, y1)
+
+    def transom_x(self, height: float) -> float:
+        """The x of the transom line (``transom_line``) at ``height``."""
+        (x0, y0), (x1, y1) = self.transom_line()
+        return x0 + (height - y0) * (x1 - x0) / (y1 - y0)
+
+    def transom_profile_line(self):
+        """The transom in the profile view: the points of the transom column
+        (``transom_station``) in the rows of the profile view (heights, not
+        the half-breadths shifted by ``base_offset`` to the plan centerline)
+        that have a cell there, ``[(x, y), ...]`` from the lowest to the
+        highest, x on the transom line (``point_x``). None without
+        ``[transom]``, [] if the column has no such cell."""
+        station = self.transom_station()
+        if station is None:
+            return None
+        plan = self.plan_centerline_y()
+        points = []
+        for n, name in enumerate(self._too["#"]):
+            cell = self._too.loc[n, station]
+            if type(cell) is not str or (
+                plan is not None and self.base_offset(name) == plan
+            ):
+                continue
+            y = self.offset_sign(station, name) * self.offset_to_length(
+                cell
+            ) + self.base_offset(name)
+            points.append((self.point_x(station, name, y), y))
+        return sorted(points, key=lambda pt: pt[1])
+
+    def transom_plan_line(self):
+        """The transom in the plan view: the points of the transom column in
+        the half-breadth rows (shifted by ``base_offset`` to the plan
+        centerline) that have a cell there and whose height is known
+        (``_transom_height``), ``[(x, y), ...]`` from the lowest to the
+        highest, x on the transom line. None without ``[transom]`` or
+        without a plan view."""
+        station = self.transom_station()
+        plan = self.plan_centerline_y()
+        if station is None or plan is None:
+            return None
+        points = []
+        for n, name in enumerate(self._too["#"]):
+            cell = self._too.loc[n, station]
+            if type(cell) is not str or self.base_offset(name) != plan:
+                continue
+            y = self.offset_sign(station, name) * self.offset_to_length(
+                cell
+            ) + self.base_offset(name)
+            height = self._transom_height(name, station, y)
+            if height is not None:
+                points.append((height, (self.transom_x(height), y)))
+        return [pt for _, pt in sorted(points)]
+
+    def plot_transom_line(self, dxf: object):
+        """Draw the transom in the profile and plan views: the polylines
+        through the points of the transom column (``transom_profile_line``,
+        ``transom_plan_line``); nothing without ``[transom]``, and no line
+        of fewer than two points."""
+        for line in (self.transom_profile_line(), self.transom_plan_line()):
+            if line and len(line) > 1:
+                dxf.add_red_polyline(line)
+
+    def _transom_height(self, row: str, station: str, y: float):
+        """The height of the point of the table row ``row`` at ``station``
+        whose coordinate in the view is ``y``: ``y`` itself in the profile
+        view, and in the plan view (the rows shifted by ``base_offset`` to the
+        plan centerline) the height of the point that has the row as its
+        half-breadth, a waterline or an item of ``body_points``. None if
+        there is none."""
+        plan = self.plan_centerline_y()
+        if plan is None or self.base_offset(row) != plan:
+            return y
+        pairs = [
+            (self.waterline_row(name), height)
+            for name, height in self.waterlines_positions().items()
+        ]
+        pairs += getattr(self, "body_points", lambda: [])()
+        for pair in pairs:
+            if pair[0] == row:
+                point = self.loft_body_line(station, [pair], skip_missing=True)
+                return point[0][1] if point else None
+        return None
+
+    def point_x(self, station: str, row: str, y: float) -> float:
+        """The x of the point of the row ``row`` at ``station`` whose y in the
+        drawing is ``y``: the position of the station, except for the raked
+        transom (``[transom]``), whose points are on the transom line at
+        their height (``_transom_height``; the station position if it is
+        unknown)."""
+        x = self.station_positions()[station]
+        if station != self.transom_station():
+            return x
+        height = self._transom_height(row, station, y)
+        return x if height is None else self.transom_x(height)
 
     def station_positions(self):
         """(virtual) Return ``{station_name: x_position}`` for every station column.
@@ -1129,9 +1325,13 @@ class Model:
 
     def waterlines_positions(self):
         """(virtual) Return a dictionary: ``{name: height}``. From
-        ``[waterlines]`` of the meta data file, if any."""
+        ``[waterlines]`` of the meta data file, if any: ``{ height }`` above the
+        base line, or ``{ dy }`` above ``dwl`` of ``[table]``."""
         if "waterlines" in self._meta:
-            return {k: float(v["height"]) for k, v in self._meta["waterlines"].items()}
+            return {
+                k: float(v["height"] if "height" in v else self.dwl() + v["dy"])
+                for k, v in self._meta["waterlines"].items()
+            }
         print("TODO: please define waterline_positions()")
         return {}
 
@@ -1140,12 +1340,16 @@ class Model:
         the unit of the model, heights above the base line. A diagonal is the straight line
         from the point ``(0, y0)`` on the centerline through the point
         ``(x1, y1)``; the table gives, per station, the distance along it from
-        ``(0, y0)`` to the hull. From ``[diagonals]`` of the meta data file;
-        the default is no diagonals."""
-        return {
-            name: (float(d["from"][1]), float(d["through"][0]), float(d["through"][1]))
-            for name, d in self._meta.get("diagonals", {}).items()
-        }
+        ``(0, y0)`` to the hull. From ``[diagonals]`` of the meta data file, the
+        points ``[x, y]`` or ``{ x = N, dy = N }`` (``dy`` above ``dwl`` of
+        ``[table]``); the default is no diagonals."""
+        dwl = self.dwl() or 0.0
+        result = {}
+        for name, d in self._meta.get("diagonals", {}).items():
+            y0 = _diagonal_point(d["from"], dwl)[1]
+            x1, y1 = _diagonal_point(d["through"], dwl)
+            result[name] = (y0, x1, y1)
+        return result
 
     def diagonal_row(self, name: str) -> str:
         """(virtual) The name of the table row with the distances of the
@@ -1187,9 +1391,8 @@ class Model:
             if type(offset) is str:
                 s = self.offset_sign(pos, line_name)
                 off = self.base_offset(line_name)
-                poly_line.append(
-                    (stations[pos], s * self.offset_to_length(offset) + off)
-                )
+                y = s * self.offset_to_length(offset) + off
+                poly_line.append((self.point_x(pos, line_name, y), y))
 
         return poly_line
 
@@ -1208,9 +1411,8 @@ class Model:
             if type(offset) is str:
                 s = self.offset_sign(pos, line_name)
                 off = self.base_offset(line_name)
-                runs[-1].append(
-                    (stations[pos], s * self.offset_to_length(offset) + off)
-                )
+                y = s * self.offset_to_length(offset) + off
+                runs[-1].append((self.point_x(pos, line_name, y), y))
             elif runs[-1]:
                 runs.append([])
         return [r for r in runs if len(r) > 1]
@@ -1247,7 +1449,8 @@ class Model:
         ``profile_end_x`` - extend the base line (the first of
         ``grid_y_origins``) and the waterlines, with their right labels, to
         this x, e.g. to run through a body plan placed to the right of the
-        profile view. Ignored if it is not beyond the last station.
+        profile view; the waterlines are named at the end of the profile view
+        too. Ignored if it is not beyond the last station.
 
         ``body_centerline`` - ``(x, bottom_y, top_y)``: draw the vertical
         centerline of a body plan there. See ``body_plan_grid_options``.
@@ -1311,6 +1514,10 @@ class Model:
             dxf.add_grid_polyline([(min(xx) - inch(12), wl_y), (wl_right, wl_y)])
             dxf.text((min(xx) - inch(12) + inch(1), wl_y + inch(1)), wl)
             dxf.text((wl_right - inch(1), wl_y + inch(1)), wl)
+            if wl_right > max(xx) + inch(12):
+                # the line runs on through a body plan: name it where the
+                # profile view ends too
+                dxf.text((max(xx) + inch(13), wl_y + inch(1)), wl)
 
         # buttocks
         buttocks_origin = 0
@@ -1324,6 +1531,21 @@ class Model:
             )
             dxf.text((min(xx) - inch(12) + inch(1), wl_y + inch(1)), wl)
             dxf.text((max(xx) + inch(12) - inch(1), wl_y + inch(1)), wl)
+
+    def plot_waterline_plan_labels(self, dxf: object):
+        """Label the waterline lines of the plan view with the name of the
+        waterline: a text just beyond the end of each line with the greatest x
+        (the lines are those of ``loft_line_n`` of ``waterline_row(name)``;
+        waterlines without a row in the table are skipped)."""
+        names = list(self._too["#"])
+        for name in self.waterlines_positions():
+            row = self.waterline_row(name)
+            if row not in names:
+                continue
+            poly = self.loft_line_n_sorted(self.line_to_index(row))
+            if poly:
+                x, y = poly[-1]
+                dxf.text((x + self.inches(1), y), name)
 
     def drawing_area_vertical_borders(self):
         """(virtual) return (bottom, top); ``vertical_borders`` of ``[sheet]``

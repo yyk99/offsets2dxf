@@ -16,6 +16,11 @@ class Test_LoadMeta(unittest.TestCase):
                 f.write(text)
             return table_of_offsets.load_meta(path)
 
+    def test_dwl(self):
+        self.assertEqual(49.0, self.load("[table]\ndwl = 49.0\n")["table"]["dwl"])
+        with self.assertRaises(ValueError):
+            self.load('[table]\ndwl = "49"\n')
+
     def test_sample(self):
         meta = table_of_offsets.load_meta(META)
         self.assertEqual("ftin", meta["table"]["unit"])
@@ -61,7 +66,7 @@ class Test_LoadMeta(unittest.TestCase):
 class Test_StationNames(unittest.TestCase):
     """stations are strings: "1", "T", "AP", "FP", "1A" ..."""
 
-    CSV = "#,FP,1A,1,2,T\nSheer,1350,1240,1158,1048,1142\n"
+    CSV = "#,FP,1A,1,2,T\nSheer,500,400,300,200,100\n"
 
     def model(self, meta_text, csv=None):
         tmp = tempfile.TemporaryDirectory()
@@ -89,7 +94,7 @@ class Test_StationNames(unittest.TestCase):
             {"FP": 3000.0, "1A": 2500.5, "1": 2000.0, "2": 1000.0, "T": 0.0},
             model.station_positions(),
         )
-        self.assertAlmostEqual(1240, model.breadth_at("1A", "Sheer"))
+        self.assertAlmostEqual(400, model.breadth_at("1A", "Sheer"))
 
     def test_positions_and_spacing(self):
         """the stations not in positions: by their place in the list"""
@@ -119,7 +124,7 @@ class Test_StationNames(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "t.csv")
             with open(path, "w") as f:
-                f.write(self.CSV.replace("1350", "1-1-0"))
+                f.write(self.CSV.replace("500", "1-1-0"))
             model = table_of_offsets.Model(path, unit="ftin")
             self.assertEqual(
                 {"FP": 0, "1A": 12, "1": 24, "2": 36, "T": 48},
@@ -186,6 +191,79 @@ class Test_ModelMeta(unittest.TestCase):
         # "0-2-0 and 0-3-0": the first value
         self.assertEqual(2.0, model.breadth_at("20", "Profile Plan"))
 
+    def test_waterline_dy(self):
+        d = tempfile.mkdtemp()
+        csv = os.path.join(d, "t.csv")
+        with open(csv, "w") as f:
+            f.write("#,1\nHeight Sheer,100\n")
+
+        def model(text):
+            with open(os.path.join(d, "t.meta"), "w") as f:
+                f.write('[table]\nunit = "mm"\n' + text + "[stations]\nspacing = 1\n")
+            return table_of_offsets.Model(csv)
+
+        m = model(
+            "dwl = 49.85\n[waterlines]\nLWL = { dy = 0.0 }\n"
+            "UP = { dy = 9.0 }\nBASE = { height = 0 }\n"
+        )
+        self.assertEqual(
+            {"LWL": 49.85, "UP": 58.85, "BASE": 0.0}, m.waterlines_positions()
+        )
+        for text in (
+            "[waterlines]\nA = { dy = 1.0 }\n",  # no dwl
+            "dwl = 1\n[waterlines]\nA = { dy = 1.0, height = 2 }\n",
+            "dwl = 1\n[waterlines]\nA = {}\n",
+        ):
+            with self.assertRaises(ValueError, msg=text):
+                model(text)
+
+    def test_diagonal_dy(self):
+        d = tempfile.mkdtemp()
+        csv = os.path.join(d, "t.csv")
+        with open(csv, "w") as f:
+            f.write("#,1\nHeight Sheer,100\n")
+
+        def model(text):
+            with open(os.path.join(d, "t.meta"), "w") as f:
+                f.write('[table]\nunit = "mm"\n' + text + "[stations]\nspacing = 1\n")
+            return table_of_offsets.Model(csv)
+
+        m = model(
+            "dwl = 50.0\n[diagonals]\n"
+            'D1 = { row = "a", from = { dy = 0.0 }, through = { x = 18.0, dy = -18.0 } }\n'
+            'D2 = { row = "b", from = [0.0, 70.0], through = { x = 34.0, dy = 0.0 } }\n'
+            'D3 = { row = "c", from = { x = 0, dy = 5.0 }, through = [10.0, 20.0] }\n'
+        )
+        self.assertEqual(
+            {
+                "D1": (50.0, 18.0, 32.0),
+                "D2": (70.0, 34.0, 50.0),
+                "D3": (55.0, 10.0, 20.0),
+            },
+            m.diagonals_positions(),
+        )
+        d1 = '[diagonals]\nD = { row = "a", from = %s, through = %s }\n'
+        for text in (
+            "dwl = 1\n" + d1 % ("{ dy = 0 }", "{ x = 1 }"),  # no dy
+            "dwl = 1\n" + d1 % ("{ dy = 0 }", "{ x = 1, y = 2, dy = 3 }"),  # x, y, dy
+            "dwl = 1\n" + d1 % ("{ x = 1, dy = 0 }", "{ dy = 1 }"),  # from off center
+            d1 % ("{ dy = 0 }", "[1, 2]"),  # dy needs dwl
+            "dwl = 1\n" + d1 % ("{ dy = 0 }", "{ x = 'a', dy = 1 }"),
+        ):
+            with self.assertRaises(ValueError, msg=text):
+                model(text)
+
+    def test_dwl_of_the_model(self):
+        d = tempfile.mkdtemp()
+        csv = os.path.join(d, "t.csv")
+        with open(csv, "w") as f:
+            f.write("#,1\nHeight Sheer,100\n")
+        meta = os.path.join(d, "t.meta")
+        with open(meta, "w") as f:
+            f.write('[table]\nunit = "mm"\ndwl = 1800\n[stations]\nspacing = 1\n')
+        self.assertEqual(1800.0, table_of_offsets.Model(csv).dwl())
+        self.assertIsNone(table_of_offsets.Model(CSV, unit="ftin", meta=False).dwl())
+
     def test_no_meta(self):
         """meta=False: no file; the defaults of the base class"""
         model = table_of_offsets.Model(CSV, unit="ftin", meta=False)
@@ -245,6 +323,159 @@ class Test_MetaLengthsInTableUnit(unittest.TestCase):
             self.assertAlmostEqual(m.station_positions()["2"], 254.0)
             self.assertAlmostEqual(m.buttocks_positions()["B1"], 508.0)
             self.assertAlmostEqual(m.waterlines_positions()["WL"], 25.4)
+
+
+class Test_Transom(unittest.TestCase):
+    """The raked transom: the points of its column are on a line given by the
+    two extra points of [transom]"""
+
+    TABLE = (
+        "#,1,T\n"
+        "Height Sheer,100,300\n"  # a height row (profile view)
+        "WL,,\n"
+        "Sheer,200,150\n"  # half-breadths (plan view)
+        "WL 1,180,100\n"
+        "WL 2,,50\n"
+        "Height Low,50,100\n"  # another height row (profile view)
+    )
+
+    LINE = (
+        '[transom]\nstation = "T"\nextra_points = [\n'
+        '  { station = "T", height = 0.0 },\n'
+        '  { station = "T", dx = -100.0, height = 200.0 },\n'
+        "]\n"
+    )
+
+    class Project(table_of_offsets.Model):
+        def base_offset(self, line_name):
+            return -500.0 if line_name.startswith(("Sheer", "WL ")) else 0.0
+
+        def body_points(self):
+            return [("Sheer", "Height Sheer")]
+
+        def plan_centerline_y(self):
+            return -500.0
+
+    def model(self, transom, cls=None):
+        d = tempfile.mkdtemp()
+        csv = os.path.join(d, "t.csv")
+        with open(csv, "w") as f:
+            f.write(self.TABLE)
+        with open(os.path.join(d, "t.meta"), "w") as f:
+            f.write(
+                '[table]\nunit = "mm"\ndwl = 100\n'
+                "[stations]\nspacing = 1000\n"
+                '[waterlines]\n"WL 1" = { dy = 0.0 }\n"WL 2" = { dy = -40.0 }\n'
+                + transom
+            )
+        return (cls or table_of_offsets.Model)(csv)
+
+    def test_line(self):
+        m = self.model(self.LINE)
+        self.assertEqual("T", m.transom_station())
+        self.assertEqual(((1000.0, 0.0), (900.0, 200.0)), m.transom_line())
+        self.assertEqual(950.0, m.transom_x(100.0))
+        self.assertEqual(1100.0, m.transom_x(-200.0))
+        self.assertIsNone(self.model("").transom_line())
+
+    def test_points_like_those_of_the_rabbet(self):
+        """dx and dy, height_row: as the extra points of the rabbet"""
+        m = self.model(
+            '[transom]\nstation = "T"\nextra_points = [\n'
+            '  { station = "1", dx = 1000.0, height = 0.0 },\n'
+            '  { station = "T", dx = -100.0, height_row = "Height Sheer", dy = -100.0 },\n'
+            "]\n"
+        )
+        self.assertEqual(((1000.0, 0.0), (900.0, 200.0)), m.transom_line())
+
+    def test_profile_row_is_on_the_line(self):
+        m = self.model(self.LINE)
+        poly = m.loft_line_n(0)
+        self.assertEqual((0.0, 100.0), poly[0])
+        # 300 mm high: x = 1000 - 300 * 100 / 200
+        self.assertEqual((850.0, 300.0), poly[1])
+
+    def test_plan_rows_are_at_the_height_of_their_point(self):
+        m = self.model(self.LINE, self.Project)
+        # Sheer: the point of body_points, at the height of "Height Sheer" (300)
+        self.assertEqual([(0.0, -300.0), (850.0, -350.0)], m.loft_line_n(2))
+        # a waterline: at its height, dwl + dy
+        self.assertEqual((950.0, -400.0), m.loft_line_n(3)[1])  # WL 1, 100
+        self.assertEqual([(970.0, -450.0)], m.loft_line_n(4))  # WL 2, 60
+
+    def test_transom_profile_line(self):
+        m = self.model(self.LINE, self.Project)
+        # the profile rows of the column, lowest first, on the transom line
+        self.assertEqual([(950.0, 100.0), (850.0, 300.0)], m.transom_profile_line())
+        self.assertIsNone(self.model("", self.Project).transom_profile_line())
+
+        class Dxf:
+            lines = []
+
+            def add_red_polyline(self, poly):
+                self.lines.append(poly)
+
+        # the plan view: the half-breadth rows, in the order of their height
+        plan = [(970.0, -450.0), (950.0, -400.0), (850.0, -350.0)]
+        self.assertEqual(plan, m.transom_plan_line())
+        self.assertIsNone(self.model("", self.Project).transom_plan_line())
+        self.assertIsNone(self.model(self.LINE).transom_plan_line())  # no plan view
+
+        m.plot_transom_line(Dxf())
+        self.assertEqual([[(950.0, 100.0), (850.0, 300.0)], plan], Dxf.lines)
+        Dxf.lines.clear()
+        self.model("", self.Project).plot_transom_line(Dxf())
+        self.assertEqual([], Dxf.lines)
+
+    def test_sheer_end_plan_lines(self):
+        m = self.model(self.LINE, self.Project)
+        # Sheer: the first body point; its ends, at 200 mm (station 1) and on
+        # the transom line at its height (300), to the plan centerline -500
+        self.assertEqual(
+            [[(0.0, -300.0), (0.0, -500.0)], [(850.0, -350.0), (850.0, -500.0)]],
+            m.sheer_end_plan_lines(),
+        )
+        # no plan view, no body_points
+        self.assertEqual([], self.model(self.LINE).sheer_end_plan_lines())
+
+    def test_sheer_end_on_the_centerline_has_no_line(self):
+        class OnCenterline(self.Project):
+            def loft_line_n(self, n):
+                return [(0.0, -500.0), (10.0, -300.0)]
+
+        m = self.model("", OnCenterline)
+        self.assertEqual([[(10.0, -300.0), (10.0, -500.0)]], m.sheer_end_plan_lines())
+
+    def test_no_transom_is_unchanged(self):
+        m = self.model("")
+        self.assertEqual([(0.0, 100.0), (1000.0, 300.0)], m.loft_line_n(0))
+
+    def test_errors(self):
+        point = '{ station = "T", height = %s }'
+        for text in (
+            # a station that is not a column
+            '[transom]\nstation = "X"\nextra_points = [%s, %s]\n'
+            % (point % 0, point % 1),
+            # one point, three points
+            '[transom]\nstation = "T"\nextra_points = [%s]\n' % (point % 0),
+            '[transom]\nstation = "T"\nextra_points = [%s, %s, %s]\n'
+            % (point % 0, point % 1, point % 2),
+            # no station
+            "[transom]\nextra_points = [%s, %s]\n" % (point % 0, point % 1),
+            # no extra_points
+            '[transom]\nstation = "T"\n',
+            # a key of the other elements
+            '[transom]\nstation = "T"\nextra_points = [%s, %s]\n'
+            % ('{ station = "T", height = 0, breadth = 1 }', point % 1),
+            # an unknown station of a point
+            '[transom]\nstation = "T"\nextra_points = [%s, %s]\n'
+            % ('{ station = "Q", height = 0 }', point % 1),
+            # the same height
+            '[transom]\nstation = "T"\nextra_points = [%s, %s]\n'
+            % (point % 5, '{ station = "T", dx = 3.0, height = 5 }'),
+        ):
+            with self.assertRaises(ValueError, msg=text):
+                self.model(text).transom_line()
 
 
 class Test_Siding(unittest.TestCase):
