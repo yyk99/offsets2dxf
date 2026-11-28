@@ -142,6 +142,7 @@ class ProjectBlueMoon(table_of_offsets.Model):
             for n in range(9, 15):
                 dxf.add_red_polyline(self.loft_line_n(n))
             self.plot_waterline_plan_labels(dxf)
+            self.plot_sheer_end_lines(dxf)
             self.plot_diagonal_plan_lines(dxf)
 
             origin_y = self.plan_centerline_y()
@@ -209,6 +210,13 @@ class ProjectBlueMoon(table_of_offsets.Model):
             # the keel and the rabbet, in the profile and plan views, as the
             # grid file gives them ([keel], [rabbet]), with the extra points
             self.plot_keel_and_rabbet(dxf)
+
+            # the raked transom of [transom], if the meta file has one: the
+            # points of its column joined in the profile view
+            self.plot_transom_line(dxf)
+
+            # the ends of the sheer line of the plan view to the centerline
+            self.plot_sheer_end_lines(dxf)
 
             # the diagonals in the plan view, below the plan centerline
             self.plot_diagonal_plan_lines(dxf)

@@ -325,6 +325,159 @@ class Test_MetaLengthsInTableUnit(unittest.TestCase):
             self.assertAlmostEqual(m.waterlines_positions()["WL"], 25.4)
 
 
+class Test_Transom(unittest.TestCase):
+    """The raked transom: the points of its column are on a line given by the
+    two extra points of [transom]"""
+
+    TABLE = (
+        "#,1,T\n"
+        "Height Sheer,100,300\n"  # a height row (profile view)
+        "WL,,\n"
+        "Sheer,200,150\n"  # half-breadths (plan view)
+        "WL 1,180,100\n"
+        "WL 2,,50\n"
+        "Height Low,50,100\n"  # another height row (profile view)
+    )
+
+    LINE = (
+        '[transom]\nstation = "T"\nextra_points = [\n'
+        '  { station = "T", height = 0.0 },\n'
+        '  { station = "T", dx = -100.0, height = 200.0 },\n'
+        "]\n"
+    )
+
+    class Project(table_of_offsets.Model):
+        def base_offset(self, line_name):
+            return -500.0 if line_name.startswith(("Sheer", "WL ")) else 0.0
+
+        def body_points(self):
+            return [("Sheer", "Height Sheer")]
+
+        def plan_centerline_y(self):
+            return -500.0
+
+    def model(self, transom, cls=None):
+        d = tempfile.mkdtemp()
+        csv = os.path.join(d, "t.csv")
+        with open(csv, "w") as f:
+            f.write(self.TABLE)
+        with open(os.path.join(d, "t.meta"), "w") as f:
+            f.write(
+                '[table]\nunit = "mm"\ndwl = 100\n'
+                "[stations]\nspacing = 1000\n"
+                '[waterlines]\n"WL 1" = { dy = 0.0 }\n"WL 2" = { dy = -40.0 }\n'
+                + transom
+            )
+        return (cls or table_of_offsets.Model)(csv)
+
+    def test_line(self):
+        m = self.model(self.LINE)
+        self.assertEqual("T", m.transom_station())
+        self.assertEqual(((1000.0, 0.0), (900.0, 200.0)), m.transom_line())
+        self.assertEqual(950.0, m.transom_x(100.0))
+        self.assertEqual(1100.0, m.transom_x(-200.0))
+        self.assertIsNone(self.model("").transom_line())
+
+    def test_points_like_those_of_the_rabbet(self):
+        """dx and dy, height_row: as the extra points of the rabbet"""
+        m = self.model(
+            '[transom]\nstation = "T"\nextra_points = [\n'
+            '  { station = "1", dx = 1000.0, height = 0.0 },\n'
+            '  { station = "T", dx = -100.0, height_row = "Height Sheer", dy = -100.0 },\n'
+            "]\n"
+        )
+        self.assertEqual(((1000.0, 0.0), (900.0, 200.0)), m.transom_line())
+
+    def test_profile_row_is_on_the_line(self):
+        m = self.model(self.LINE)
+        poly = m.loft_line_n(0)
+        self.assertEqual((0.0, 100.0), poly[0])
+        # 300 mm high: x = 1000 - 300 * 100 / 200
+        self.assertEqual((850.0, 300.0), poly[1])
+
+    def test_plan_rows_are_at_the_height_of_their_point(self):
+        m = self.model(self.LINE, self.Project)
+        # Sheer: the point of body_points, at the height of "Height Sheer" (300)
+        self.assertEqual([(0.0, -300.0), (850.0, -350.0)], m.loft_line_n(2))
+        # a waterline: at its height, dwl + dy
+        self.assertEqual((950.0, -400.0), m.loft_line_n(3)[1])  # WL 1, 100
+        self.assertEqual([(970.0, -450.0)], m.loft_line_n(4))  # WL 2, 60
+
+    def test_transom_profile_line(self):
+        m = self.model(self.LINE, self.Project)
+        # the profile rows of the column, lowest first, on the transom line
+        self.assertEqual([(950.0, 100.0), (850.0, 300.0)], m.transom_profile_line())
+        self.assertIsNone(self.model("", self.Project).transom_profile_line())
+
+        class Dxf:
+            lines = []
+
+            def add_red_polyline(self, poly):
+                self.lines.append(poly)
+
+        # the plan view: the half-breadth rows, in the order of their height
+        plan = [(970.0, -450.0), (950.0, -400.0), (850.0, -350.0)]
+        self.assertEqual(plan, m.transom_plan_line())
+        self.assertIsNone(self.model("", self.Project).transom_plan_line())
+        self.assertIsNone(self.model(self.LINE).transom_plan_line())  # no plan view
+
+        m.plot_transom_line(Dxf())
+        self.assertEqual([[(950.0, 100.0), (850.0, 300.0)], plan], Dxf.lines)
+        Dxf.lines.clear()
+        self.model("", self.Project).plot_transom_line(Dxf())
+        self.assertEqual([], Dxf.lines)
+
+    def test_sheer_end_plan_lines(self):
+        m = self.model(self.LINE, self.Project)
+        # Sheer: the first body point; its ends, at 200 mm (station 1) and on
+        # the transom line at its height (300), to the plan centerline -500
+        self.assertEqual(
+            [[(0.0, -300.0), (0.0, -500.0)], [(850.0, -350.0), (850.0, -500.0)]],
+            m.sheer_end_plan_lines(),
+        )
+        # no plan view, no body_points
+        self.assertEqual([], self.model(self.LINE).sheer_end_plan_lines())
+
+    def test_sheer_end_on_the_centerline_has_no_line(self):
+        class OnCenterline(self.Project):
+            def loft_line_n(self, n):
+                return [(0.0, -500.0), (10.0, -300.0)]
+
+        m = self.model("", OnCenterline)
+        self.assertEqual([[(10.0, -300.0), (10.0, -500.0)]], m.sheer_end_plan_lines())
+
+    def test_no_transom_is_unchanged(self):
+        m = self.model("")
+        self.assertEqual([(0.0, 100.0), (1000.0, 300.0)], m.loft_line_n(0))
+
+    def test_errors(self):
+        point = '{ station = "T", height = %s }'
+        for text in (
+            # a station that is not a column
+            '[transom]\nstation = "X"\nextra_points = [%s, %s]\n'
+            % (point % 0, point % 1),
+            # one point, three points
+            '[transom]\nstation = "T"\nextra_points = [%s]\n' % (point % 0),
+            '[transom]\nstation = "T"\nextra_points = [%s, %s, %s]\n'
+            % (point % 0, point % 1, point % 2),
+            # no station
+            "[transom]\nextra_points = [%s, %s]\n" % (point % 0, point % 1),
+            # no extra_points
+            '[transom]\nstation = "T"\n',
+            # a key of the other elements
+            '[transom]\nstation = "T"\nextra_points = [%s, %s]\n'
+            % ('{ station = "T", height = 0, breadth = 1 }', point % 1),
+            # an unknown station of a point
+            '[transom]\nstation = "T"\nextra_points = [%s, %s]\n'
+            % ('{ station = "Q", height = 0 }', point % 1),
+            # the same height
+            '[transom]\nstation = "T"\nextra_points = [%s, %s]\n'
+            % (point % 5, '{ station = "T", dx = 3.0, height = 5 }'),
+        ):
+            with self.assertRaises(ValueError, msg=text):
+                self.model(text).transom_line()
+
+
 class Test_Siding(unittest.TestCase):
     def model(self, text):
         d = tempfile.mkdtemp()
